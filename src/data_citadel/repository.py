@@ -35,6 +35,14 @@ def dotted_get(document: Mapping[str, Any], name: str, default: Any = None) -> A
     return values[0]
 
 
+def reviewed_correct(episode: Episode) -> bool:
+    reviewer = dotted_get(episode.metadata, "task.review.reviewer")
+    return (
+        episode.label == "correct" and (episode.review_status or "").casefold() == "accepted"
+        and isinstance(reviewer, str) and bool(reviewer.strip())
+    )
+
+
 def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     result: dict[str, Any] = {}
     for key, value in pairs:
@@ -166,25 +174,26 @@ class EpisodeRepository:
     def inventory(self) -> dict[str, Any]:
         episodes = self.list_episodes()
         counts: dict[str, Counter] = defaultdict(Counter)
-        groups: dict[tuple[str, str], Counter] = defaultdict(Counter)
+        groups: dict[str, Counter] = defaultdict(Counter)
         total = Counter()
         for episode in episodes:
             counts[episode.action_id][episode.label] += 1
             total[episode.label] += 1
-            if (episode.label == "correct" and episode.review_status == "Accepted"
-                    and episode.task_code and episode.collector_id):
-                groups[(episode.action_id, episode.task_code)][episode.collector_id] += 1
+            if reviewed_correct(episode):
+                groups[episode.action_id][episode.collector_id] += 1
         return {
             "total_episodes": len(episodes), "action_count": len(counts),
             "category_counts": {label: total[label] for label in LABELS},
             "actions": {action: {label: count[label] for label in LABELS}
                         for action, count in sorted(counts.items())},
             "expert_availability": [
-                {"action_id": action, "task_code": task,
+                {"action_id": action, "reviewed_correct_count": collectors.total(),
+                 "collector_count": len(collectors),
                  "collector_group_counts": sorted(collectors.values(), reverse=True),
-                 "max_same_collector_correct": max(collectors.values()),
-                 "groups_with_10_correct": sum(count >= 10 for count in collectors.values())}
-                for (action, task), collectors in sorted(groups.items())
+                 "expert_candidates": min(5, collectors.total()),
+                 "correct_test_candidates": min(5, max(0, collectors.total() - 5))}
+                for action in sorted(counts) for collectors in [groups[action]]
             ],
-            "expert_candidates_are_human_verified": False,
+            "task_grouping": "action_id",
+            "expert_approval_source": "dataset_review",
         }

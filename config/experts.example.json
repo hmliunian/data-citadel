@@ -1,13 +1,11 @@
 {
-  "version": "example-v1",
+  "version": "example-v2",
   "groups": [
     {
       "action_id": "A_001",
-      "task_code": "REPLACE_WITH_EXACT_TASK_CODE",
-      "collector_id": "REPLACE_WITH_EXPERT_COLLECTOR",
+      "approval_source": "dataset_review",
       "approved": false,
-      "reviewer": null,
-      "policy": "same_task_same_collector_v1",
+      "policy": "same_action_v2",
       "expert_episode_ids": [
         "expert-01",
         "expert-02",

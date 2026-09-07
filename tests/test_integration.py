@@ -18,22 +18,31 @@ from test_media import TOPIC, synthetic_video
 from test_repository import bundle
 
 
-@pytest.mark.parametrize("model_verdict,strategy,expected", [
-    ("correct", "uniform", "correct"),
-    ("uncertain", "uniform", "uncertain"),
-    ("incorrect", "uniform", "incorrect"),
-    ("correct", "keyframes", "uncertain"),
+@pytest.mark.parametrize("model_verdict,strategy,approved,expected,error_types", [
+    ("correct", "uniform", True, "correct", []),
+    ("uncertain", "uniform", True, "uncertain", []),
+    ("incorrect", "uniform", True, "incorrect", ["incomplete_action"]),
+    ("correct", "keyframes", True, "uncertain", []),
+    ("correct", "uniform", False, "uncertain", []),
+    ("incorrect", "uniform", False, "incorrect", ["blurred"]),
 ])
 def test_verified_mcap_experts_qwen_and_api_share_contracts(
-    tmp_path, monkeypatch, model_verdict, strategy, expected,
+    tmp_path, monkeypatch, model_verdict, strategy, approved, expected, error_types,
 ):
     # Generated fixtures only: this approval cannot affect real expert manifests.
     monkeypatch.setenv("QWEN_API_KEY", "integration-fixture-key")
     encoded = synthetic_video(tmp_path, frames=21, moving=True).mcap_path.read_bytes()
     dataset = tmp_path / "dataset"
     ids = [f"{index:032x}" for index in range(6)]
+    instructions = [f"拿起{object_name}。" for object_name in ("杯子", "书本", "瓶子", "毛巾", "玩具", "苹果")]
     for index, episode_id in enumerate(ids):
-        directory = bundle(dataset, episode_id, label="other" if index == 5 else "correct")
+        directory = bundle(dataset, episode_id, label="other" if index == 5 else "correct", document={
+            "task.action_id": "A_001", "task.task_code": f"private-task-{index}",
+            "task.action_text": {"rendered_zh": instructions[index]},
+            "task.collector.user": f"private-person-{index}", "task.review.status": "Accepted",
+            "task.review.reviewer": f"private-reviewer-{index}",
+            "task.review.deny_reason": "private-evaluation-label",
+        })
         path = directory / "episode.mcap"
         path.write_bytes(encoded)
         receipt_path = directory / "verification.json"
@@ -44,12 +53,12 @@ def test_verified_mcap_experts_qwen_and_api_share_contracts(
         )
         receipt_path.write_text(json.dumps(receipt))
     manifest = tmp_path / "experts.json"
+    assert EXPERT_POLICY == "same_action_v2"
     manifest.write_text(json.dumps({
-        "version": "synthetic-integration-v1",
+        "version": "synthetic-integration-v2",
         "groups": [{
-            "action_id": "A_001", "task_code": "task-1", "collector_id": "private-person",
-            "approved": True, "reviewer": "fixture-only", "policy": EXPERT_POLICY,
-            "expert_episode_ids": ids[:5],
+            "action_id": "A_001", "approved": approved, "approval_source": "dataset_review",
+            "policy": EXPERT_POLICY, "expert_episode_ids": ids[:5],
         }],
     }))
     settings = Settings(
@@ -64,7 +73,7 @@ def test_verified_mcap_experts_qwen_and_api_share_contracts(
         assert request.headers["authorization"] == "Bearer integration-fixture-key"
         content = payload["messages"][1]["content"]
         is_task = json.loads(content[0]["text"])["video"] == "EXPERT 1"
-        verdict = model_verdict if is_task else "correct"
+        verdict = model_verdict if is_task or not approved else "correct"
         assessment = {
             "verdict": verdict, "reason": "synthetic provider assessment",
             "confidence": 0.99, "complete": verdict != "uncertain",
@@ -73,8 +82,9 @@ def test_verified_mcap_experts_qwen_and_api_share_contracts(
         }
         if verdict == "incorrect":
             assessment["findings"] = [{
-                "code": "incomplete_action", "reason": "completion absent",
-                "evidence": [{"timestamp_s": 2.0, "description": "unfinished at end"}],
+                "code": "incomplete_action" if is_task else "blurred",
+                "reason": "visible fixture problem",
+                "evidence": [{"timestamp_s": 2.0, "description": "problem at end"}],
             }]
         return httpx.Response(200, json={"choices": [{
             "finish_reason": "stop", "message": {"content": json.dumps(assessment)},
@@ -92,14 +102,21 @@ def test_verified_mcap_experts_qwen_and_api_share_contracts(
     result = response.json()
     assert result["verdict"] == expected
     assert result["ground_truth_candidate"] is (expected == "correct")
-    assert result["error_types"] == (["incomplete_action"] if expected == "incorrect" else [])
-    assert result["provenance"]["expert_ids"] == ids[:5]
+    assert result["error_types"] == error_types
+    assert result["provenance"]["expert_ids"] == (ids[:5] if approved else [])
+    assert ids[-1] not in result["provenance"]["expert_ids"]
     assert result["provenance"]["candidate_timestamps_s"] == [0.0, 2.0]
-    assert len(requests) == 2
-    task_content = requests[1]["messages"][1]["content"]
-    assert sum(item["type"] == "image_url" for item in task_content) == 17
+    assert len(requests) == (2 if approved else 1)
+    for index, payload in enumerate(requests):
+        content = payload["messages"][1]["content"]
+        headers = [json.loads(item["text"]) for item in content
+                   if item["type"] == "text" and item["text"].startswith("{")]
+        expected_instructions = instructions if index else instructions[-1:]
+        assert [header["task_instruction"] for header in headers] == expected_instructions
+        assert headers[-1]["video"] == "CANDIDATE"
+        assert sum(item["type"] == "image_url" for item in content) == (17 if index else 2)
     transmitted = json.dumps(requests)
-    for private in ("private-person", "private-evaluation-label", str(dataset), ids[-1]):
+    for private in ("private-person", "private-reviewer", "private-task", "private-evaluation-label", str(dataset), *ids):
         assert private not in transmitted
     artifacts = list((settings.artifacts_dir / "reviews").glob("*.json"))
     assert len(artifacts) == 1

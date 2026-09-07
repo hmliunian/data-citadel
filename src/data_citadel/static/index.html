@@ -18,26 +18,40 @@
   figure{margin:0}img{width:100%;border-radius:6px}figcaption{font-size:13px;color:#526c66}
   pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:13px;max-height:500px;overflow:auto}
   #status{min-height:24px}#decision{font-size:22px;font-weight:600}
+  .truth{background:#eef4fb;padding:12px;border-radius:6px}
 </style>
 <header><div><h1>Data Citadel</h1><p class="muted">原子操作数据审核 · 10 个任务</p></div><a href="/docs">API 文档</a></header>
 <main>
   <section class="card"><h2>选择采集记录</h2>
     <div class="row">
-      <label>动作类别<select id="action"></select></label>
+      <label>原子任务（动作类别）<select id="action"></select></label>
       <label style="flex:3">采集记录<select id="episode"></select></label>
       <label>抽帧方案<select id="strategy"><option value="uniform">每 2 秒抽帧</option><option value="keyframes">夹爪事件关键帧</option></select></label>
     </div>
-    <p id="instruction"></p><p id="reference" class="muted"></p>
+    <p id="instruction"></p><p id="reference" class="muted"></p><p id="groundTruth" class="truth"></p>
     <div class="row"><button id="preview" class="secondary">预览画面</button><button id="review">开始审核</button></div>
     <p id="status" role="status" aria-live="polite"></p>
   </section>
-  <section class="card" id="result" hidden><h2>审核结果</h2><p id="decision"></p><p id="reason"></p><details><summary>证据与完整结果</summary><pre id="details"></pre></details></section>
+  <section class="card" id="result" hidden><h2>模型审核结果</h2><p id="resultGroundTruth" class="truth"></p><p id="decision"></p><p id="reason"></p><p id="expertNote" class="muted"></p><details><summary>专家参考与 Qwen 任务判断</summary><ol id="expertList"></ol><p id="taskAssessment"></p></details><details><summary>证据与完整结果</summary><p id="qwenLabels" class="muted"></p><pre id="details"></pre></details></section>
   <section class="card" id="previewCard" hidden><h2>带时间戳的画面</h2><p id="samplingNote" class="muted"></p><div id="frames"></div></section>
 </main>
 <script>
   const $ = id => document.getElementById(id);
   let episodes = [];
-  const verdicts = {correct:'正确 · ground truth 候选',incorrect:'发现问题',uncertain:'无法确认 · 需要人工复核'};
+  const labelNames = {correct:'正确',incorrect:'错误',uncertain:'无法确认',data_missing:'数据缺失',blurred:'画面模糊',content_mismatch:'采集内容不符合要求',incomplete_action:'动作不完整',repeated_retry:'反复重试',retry_then_success:'反复重试',annotation_error:'标注信息错误',other:'其他问题'};
+  function labelText(label){
+    return `${labelNames[label] || label}（${label}）`;
+  }
+  function reviewLabel(assessment){
+    if(!assessment) return '未执行';
+    const errors = assessment.error_types ?? assessment.findings?.map(item => item.code) ?? [];
+    const label = assessment.verdict === 'incorrect' && errors.length ? errors[0] : assessment.verdict;
+    return labelText(label);
+  }
+  function groundTruthText(item){
+    const label = item?.reference_label;
+    return 'GT（Ground Truth，原人工审核标签）：' + (label ? labelText(label) : '未提供');
+  }
   async function api(path, options){
     const response = await fetch(path, options);
     const data = await response.json();
@@ -47,7 +61,8 @@
   function selection(){
     const item = episodes.find(item => item.episode_id === $('episode').value);
     $('instruction').textContent = item?.instruction || '';
-    $('reference').textContent = item ? `任务 ${item.task_code} · 既有人工标签 ${item.reference_label || '未标注'}` : '';
+    $('reference').textContent = item ? `原子任务 ${item.action_id} · 原始指令编号 ${item.task_code}` : '';
+    $('groundTruth').textContent = groundTruthText(item);
     $('result').hidden = true; $('previewCard').hidden = true;
   }
   function filter(){
@@ -57,13 +72,29 @@
   async function run(kind){
     if(!$('episode').value) return;
     $('preview').disabled = $('review').disabled = true;
+    $(kind === 'review' ? 'result' : 'previewCard').hidden = true;
     $('status').textContent = kind === 'review' ? '正在审核，模型分析可能需要几分钟…' : '正在解码并抽帧…';
     try {
       const id = $('episode').value, strategy = $('strategy').value;
       if(kind === 'review'){
         const result = await api('/v1/reviews', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({episode_id:id,strategy})});
-        $('result').hidden = false; $('decision').textContent = verdicts[result.verdict];
-        $('reason').textContent = result.reason; $('details').textContent = JSON.stringify(result,null,2);
+        $('result').hidden = false;
+        $('decision').textContent = 'Predict（最终审核标签）：' + reviewLabel(result);
+        $('resultGroundTruth').textContent = groundTruthText(episodes.find(item => item.episode_id === result.episode_id));
+        $('reason').textContent = result.reason;
+        $('expertNote').textContent = `专家参考：${result.provenance?.expert_ids?.length || 0}/5 条 · 按原子任务 ${result.action_id} 匹配`;
+        $('expertList').replaceChildren(...(result.provenance?.expert_tasks || []).map(expert => {
+          const item = document.createElement('li');
+          const frames = result.provenance?.expert_timestamps_s?.[expert.episode_id]?.length || 0;
+          item.textContent = `${expert.instruction} · ${frames} 帧 · ${expert.episode_id}`;
+          return item;
+        }));
+        const task = result.assessments?.task;
+        const qwenTask = result.provenance?.expert_ids?.length === 5 ? task : null;
+        $('qwenLabels').textContent = `Qwen 原始标签：通用 ${reviewLabel(result.assessments?.generic)}；任务 ${reviewLabel(qwenTask)}`;
+        const taskLabel = result.provenance?.expert_ids?.length === 5 ? 'Qwen 任务分项' : '任务分项（未调用 Qwen）';
+        $('taskAssessment').textContent = task ? `${taskLabel}（${task.verdict}）：${task.reason}；最终结论仍以上方严格审核结果为准。` : '任务审核尚未执行。';
+        $('details').textContent = JSON.stringify(result,null,2);
       }else{
         const result = await api(`/v1/episodes/${id}/frames?strategy=${strategy}&interval_s=2`);
         $('previewCard').hidden = false;

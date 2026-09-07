@@ -3,6 +3,7 @@ from unittest.mock import Mock
 
 import pytest
 
+from data_citadel.experts import EXPERT_POLICY
 from data_citadel.models import Assessment, Episode, Evidence, ExpertError, Finding, Frame, MediaError, ProviderError, SampledVideo
 from data_citadel.review.integrity import check_fields, check_integrity
 from data_citadel.review.policy import decide
@@ -99,7 +100,13 @@ def service(episode, tmp_path, monkeypatch):
         [Frame(0.0, b"a"), Frame(2.0, b"b")], 2.0, "camera", "uniform",
     )
     experts = Mock(version="test-v1", manifest_sha256="a" * 64)
-    experts.resolve.return_value = [replace(episode, episode_id=f"expert-{i}") for i in range(5)]
+    experts.resolve.return_value = [
+        replace(episode, episode_id=f"expert-{i}", task_code=f"other-task-{i}",
+                instruction=f"拿起物体{i}", collector_id=f"other-collector-{i}",
+                metadata={"task.review": {"reviewer": f"source-reviewer-{i}",
+                                         "review_time": "2026-07-30 09:47:01"}})
+        for i in range(5)
+    ]
     client = Mock()
     client.assess_generic.return_value = passing()
     client.assess_task.return_value = passing()
@@ -111,27 +118,60 @@ def service(episode, tmp_path, monkeypatch):
     ))
 
 
-def test_service_samples_experts_at_one_second_and_records_provenance(service):
-    result = service.review("candidate", "gripper")
+def test_service_keeps_each_expert_instruction_and_local_review_provenance(service):
+    result = service.review("candidate", "keyframes")
     assert result.ground_truth_candidate
     calls = service.sampler.sample.call_args_list
-    assert calls[0].kwargs == {"strategy": "gripper", "interval_s": 2.0}
+    assert calls[0].kwargs == {"strategy": "keyframes", "interval_s": 2.0}
     assert all(call.kwargs == {"strategy": "uniform", "interval_s": 1.0} for call in calls[1:])
     assert len(result.provenance["expert_ids"]) == 5
     assert result.provenance["candidate_timestamps_s"] == [0.0, 2.0]
-    assert result.provenance["prompt_version"] and result.provenance["policy_version"]
     assert result.provenance["expert_version"] == "test-v1"
-    assert "test-v1" in result.model_dump_json()
-    # Model input consists of instruction and media, never Episode or human labels.
+    assert result.provenance["expert_config_sha256"] == "a" * 64
+    assert result.provenance["expert_matching_policy"] == EXPERT_POLICY
+    records = result.provenance["expert_tasks"]
+    assert [item["task_code"] for item in records] == [f"other-task-{i}" for i in range(5)]
+    assert [item["source_reviewer"] for item in records] == [f"source-reviewer-{i}" for i in range(5)]
+    assert all(item["source_review_status"] == "Accepted" for item in records)
+    assert all(item["source_review_time"] == "2026-07-30 09:47:01" for item in records)
+    assert "source-reviewer-0" in result.model_dump_json()
     assert service.client.assess_generic.call_args.args[0] == "拿起杯子"
+    candidate_instruction, _, expert_videos = service.client.assess_task.call_args.args
+    assert candidate_instruction == "拿起杯子"
+    assert [text for text, _ in expert_videos] == [f"拿起物体{i}" for i in range(5)]
+    assert "source-reviewer" not in repr(service.client.mock_calls)
+    assert "Accepted" not in repr(service.client.mock_calls)
 
 
-def test_no_approved_experts_is_uncertain_without_api_calls(service):
-    service.experts.resolve.side_effect = ExpertError("approval required")
+@pytest.mark.parametrize("generic_verdict,expected", [
+    ("correct", "uncertain"), ("uncertain", "uncertain"), ("incorrect", "incorrect"),
+])
+def test_no_experts_still_runs_generic_without_leaking_resolution_error(service, generic_verdict, expected):
+    service.experts.resolve.side_effect = ExpertError("private-label-or-reviewer")
+    findings = [Finding(code="blurred", reason="关键画面模糊", evidence=passing().evidence)]
+    service.client.assess_generic.return_value = passing(
+        verdict=generic_verdict, findings=findings if generic_verdict == "incorrect" else [],
+    )
+    result = service.review("candidate")
+    assert result.verdict == expected and not result.ground_truth_candidate
+    assert result.assessments["task"].verdict == "uncertain"
+    assert result.assessments["generic"].verdict == generic_verdict
+    assert result.error_types == (["blurred"] if generic_verdict == "incorrect" else [])
+    assert result.provenance["candidate_timestamps_s"] == [0.0, 2.0]
+    assert result.provenance["expert_ids"] == []
+    assert result.provenance["expert_tasks"] == []
+    assert "private-label-or-reviewer" not in result.model_dump_json()
+    service.sampler.sample.assert_called_once()
+    service.client.assess_generic.assert_called_once()
+    service.client.assess_task.assert_not_called()
+
+
+def test_expert_sampling_warning_still_prevents_ground_truth(service):
+    video = service.sampler.sample.return_value
+    service.sampler.sample.side_effect = [video, replace(video, warnings=["coverage_gap"]), *([video] * 4)]
     result = service.review("candidate")
     assert result.verdict == "uncertain" and not result.ground_truth_candidate
-    service.client.assess_generic.assert_not_called()
-    service.client.assess_task.assert_not_called()
+    assert result.provenance["warnings"] == ["expert_1: coverage_gap"]
 
 
 def test_missing_metadata_stops_before_sampling_or_model(service, episode):
@@ -155,8 +195,12 @@ def test_operational_failures_are_not_negative_training_labels(service, stage, e
         service.review("candidate")
 
 
-def test_total_request_budget_fails_before_any_paid_calls(service):
-    service.settings = replace(service.settings, max_request_images=11)
+@pytest.mark.parametrize("experts_available,max_images", [(True, 11), (False, 1)])
+def test_request_budget_fails_before_any_paid_calls(service, experts_available, max_images):
+    if not experts_available:
+        service.experts.resolve.side_effect = ExpertError("no experts")
+    service.settings = replace(service.settings, max_request_images=max_images)
     with pytest.raises(ProviderError, match="image_budget_exceeded"):
         service.review("candidate")
     service.client.assess_generic.assert_not_called()
+    service.client.assess_task.assert_not_called()

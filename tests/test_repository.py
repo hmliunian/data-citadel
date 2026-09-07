@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from data_citadel.models import DatasetError, EpisodeNotFound
-from data_citadel.repository import EpisodeRepository, dotted_get
+from data_citadel.repository import EpisodeRepository, dotted_get, reviewed_correct
 
 
 def bundle(root: Path, episode_id="a" * 32, label="correct", document=None):
@@ -16,6 +16,7 @@ def bundle(root: Path, episode_id="a" * 32, label="correct", document=None):
         "task.action_id": "A_001", "task.task_code": "task-1",
         "task.action_text": {"rendered_zh": "把杯子拿起来"},
         "task.collector.user": "private-person", "task.review.status": "Accepted",
+        "task.review.reviewer": "private-reviewer",
         "task.review.deny_reason": "private-evaluation-label",
     }))
     files = {}
@@ -90,3 +91,42 @@ def test_conflicting_dotted_metadata_is_rejected():
                       "task.action_text.rendered_zh") == "task"
     with pytest.raises(DatasetError, match="Conflicting"):
         dotted_get({"task.action_id": "A_001", "task": {"action_id": "A_002"}}, "task.action_id")
+
+
+def test_inventory_counts_one_action_across_tasks_objects_and_collectors(tmp_path):
+    for index in range(10):
+        bundle(tmp_path, f"{index:032x}", document={
+            "task.action_id": "A_001", "task.task_code": f"task-{index % 2}",
+            "task.action_text": {"rendered_zh": f"拿起物体 {index}"},
+            "task.collector.user": f"private-collector-{index % 2}",
+            "task.review.status": "Accepted", "task.review.reviewer": "private-reviewer",
+        })
+    inventory = EpisodeRepository(tmp_path).inventory()
+    assert inventory["task_grouping"] == "action_id"
+    assert inventory["action_count"] == 1
+    assert inventory["actions"]["A_001"]["correct"] == 10
+    assert inventory["expert_availability"] == [{
+        "action_id": "A_001", "reviewed_correct_count": 10, "collector_count": 2,
+        "collector_group_counts": [5, 5], "expert_candidates": 5, "correct_test_candidates": 5,
+    }]
+    assert "private-" not in json.dumps(inventory)
+
+
+@pytest.mark.parametrize("reviewer,status,expected", [
+    ("original-reviewer", "Accepted", True),
+    ("original-reviewer", "accepted", True),
+    ("", "Accepted", False),
+    (None, "Accepted", False),
+    ("original-reviewer", "Denied", False),
+])
+def test_source_approval_needs_accepted_and_a_recorded_reviewer(tmp_path, reviewer, status, expected):
+    bundle(tmp_path, document={
+        "task.action_id": "A_001", "task.task_code": "task",
+        "task.action_text": {"rendered_zh": "拿起杯子"},
+        "task.collector.user": "collector",
+        "task": {"review": {"status": status, "reviewer": reviewer}},
+    })
+    repository = EpisodeRepository(tmp_path)
+    assert reviewed_correct(repository.get("a" * 32)) is expected
+    availability = repository.inventory()["expert_availability"][0]
+    assert availability["reviewed_correct_count"] == int(expected)

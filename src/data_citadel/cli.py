@@ -21,7 +21,7 @@ def main(argv=None) -> int:
     parser.add_argument("--artifacts-dir", type=Path)
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("inventory", help="统计本地样本及专家集缺额")
-    prepare = commands.add_parser("prepare", help="生成待人工确认的专家和测试清单")
+    prepare = commands.add_parser("prepare", help="按原子动作生成专家与独立测试清单")
     prepare.add_argument("--output-dir", type=Path, default=Path("config"))
     sample = commands.add_parser("sample", help="导出带时间戳的 JPEG 抽帧")
     sample.add_argument("episode_id")

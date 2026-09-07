@@ -1,5 +1,5 @@
 {
-  "version": "example-v1",
+  "version": "example-v2",
   "expert_episode_ids": ["expert-01", "expert-02", "expert-03", "expert-04", "expert-05"],
   "samples": [
     {

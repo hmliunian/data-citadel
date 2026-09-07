@@ -5,9 +5,11 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from .. import __version__
+from ..experts import EXPERT_POLICY
 from ..media.mcap_reader import inspect_mcap
 from ..models import Assessment, ExpertError, ProviderError, ReviewResult
 from ..prompts import PROMPT_VERSION
+from ..repository import dotted_get
 from ..settings import Settings
 from .integrity import check_fields, check_integrity
 from .policy import POLICY_VERSION, decide
@@ -37,7 +39,11 @@ class ReviewService:
             "max_frames_per_video": self.settings.max_frames,
             "max_request_images": self.settings.max_request_images,
             "correct_threshold": self.settings.correct_threshold,
+            "expert_matching_policy": EXPERT_POLICY,
+            "expert_version": self.experts.version,
+            "expert_config_sha256": self.experts.manifest_sha256,
             "expert_ids": [],
+            "expert_tasks": [],
         }
         assessments = {"integrity": check_fields(episode)}
         if assessments["integrity"].verdict == "incorrect":
@@ -49,19 +55,25 @@ class ReviewService:
         if assessments["integrity"].verdict != "correct":
             return self._result(episode, assessments, provenance)
 
+        candidate = self.sampler.sample(episode, strategy=strategy, interval_s=2.0)
+        expert_episodes = []
         try:
             expert_episodes = self.experts.resolve(episode)
         except ExpertError:
             assessments["task"] = Assessment(
-                verdict="uncertain", reason="没有可用的五条独立、人工批准且任务匹配的专家样例。",
+                verdict="uncertain", reason="没有可用的五条独立、人工批准且同原子动作的专家样例。",
                 confidence=0.0,
             )
-            return self._result(episode, assessments, provenance)
 
         provenance["expert_ids"] = [item.episode_id for item in expert_episodes]
-        provenance["expert_version"] = self.experts.version
-        provenance["expert_config_sha256"] = self.experts.manifest_sha256
-        candidate = self.sampler.sample(episode, strategy=strategy, interval_s=2.0)
+        provenance["expert_tasks"] = [
+            {"episode_id": item.episode_id, "action_id": item.action_id,
+             "task_code": item.task_code, "instruction": item.instruction,
+             "source_review_status": item.review_status,
+             "source_reviewer": dotted_get(item.metadata, "task.review.reviewer"),
+             "source_review_time": dotted_get(item.metadata, "task.review.review_time")}
+            for item in expert_episodes
+        ]
         expert_videos = [
             (item.instruction, self.sampler.sample(item, strategy="uniform", interval_s=1.0))
             for item in expert_episodes
@@ -84,7 +96,8 @@ class ReviewService:
         if total_frames > self.settings.max_request_images:
             raise ProviderError("image_budget_exceeded: raise max_request_images or select shorter clips")
         assessments["generic"] = self.client.assess_generic(episode.instruction, candidate)
-        assessments["task"] = self.client.assess_task(episode.instruction, candidate, expert_videos)
+        if expert_videos:
+            assessments["task"] = self.client.assess_task(episode.instruction, candidate, expert_videos)
         return self._result(episode, assessments, provenance, warnings)
 
     def _result(self, episode, assessments, provenance, warnings=None) -> ReviewResult:
