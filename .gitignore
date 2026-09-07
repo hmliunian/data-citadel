@@ -1,3 +1,13 @@
 # Local Qwen API credentials
 Qwen-api/
 qwen-api/
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.env
+artifacts/
+config/experts.json
+config/evaluation.json

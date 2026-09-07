@@ -1,5 +1,5 @@
 实验对象：
-    1.取7个任务
+    1.取10个任务
     2.找到对应的原子操作标签：比如抓起xxx或者是按下xxx
     3.看看是否有以下错误分类： task.review.deny_reason
     - 数据缺失（有field不存在，说明有bug，需要立刻修复硬件/软件）
@@ -25,8 +25,8 @@ dataset path:
     1. 方案一：2s一张图片，只使用主视角的其中一路。
     2. 方案二：关键帧 + 首位帧 关键帧定义：夹爪开始闭合和结束闭合+夹爪开始张开和结束张开
 
-算法：使用Qwen api max实现 
-    qwen-api-key:/home/xuran/xuran_projects/data_review/dataset_checker/Qwen-api/qwen_api_key.txt
+算法：使用 Qwen-VL-Max API 实现
+    qwen-api-key:/home/xuran/xuran_projects/data_review/data_citadel/Qwen-api/qwen_api_key.txt
     1.需要面向接口设计（web端），input：id output:返回错误类型或者是正确标签
     2.利用专家视频（5条）给予qwen api正确的指导。expert视频可以使用1s一张图片这种精确的操作理解视频
     3.看其他的错误视频，通用错误可以用text prompt去识别。（画面模糊，视觉缺失）
