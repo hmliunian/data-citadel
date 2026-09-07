@@ -1,0 +1,20 @@
+{
+  "version": "example-v1",
+  "groups": [
+    {
+      "action_id": "A_001",
+      "task_code": "REPLACE_WITH_EXACT_TASK_CODE",
+      "collector_id": "REPLACE_WITH_EXPERT_COLLECTOR",
+      "approved": false,
+      "reviewer": null,
+      "policy": "same_task_same_collector_v1",
+      "expert_episode_ids": [
+        "expert-01",
+        "expert-02",
+        "expert-03",
+        "expert-04",
+        "expert-05"
+      ]
+    }
+  ]
+}
