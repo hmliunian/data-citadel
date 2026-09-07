@@ -16,6 +16,9 @@ dependencies = [
 [dependency-groups]
 dev = ["pytest>=8,<10", "ruff>=0.9,<1"]
 
+[project.scripts]
+data-citadel = "data_citadel.cli:main"
+
 [tool.setuptools.packages.find]
 where = ["src"]
 

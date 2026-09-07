@@ -11,3 +11,4 @@ __pycache__/
 artifacts/
 config/experts.json
 config/evaluation.json
+config/report.json

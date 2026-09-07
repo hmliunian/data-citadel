@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Data Citadel · 数据审核</title>
+<style>
+  :root{font-family:system-ui,sans-serif;color:#182b33;background:#f4f6f5}
+  body{max-width:1120px;margin:auto;padding:32px 20px}
+  header{display:flex;justify-content:space-between;align-items:center;margin-bottom:32px}
+  h1{font-size:30px;margin:0}h2{font-size:20px}a{color:#14695c}
+  .card{background:white;border:1px solid #dce4e0;border-radius:12px;padding:22px;margin:18px 0}
+  .row{display:flex;gap:12px;flex-wrap:wrap;align-items:end}
+  label{display:grid;gap:8px;flex:1;min-width:140px;font-size:14px}
+  select,button{font:inherit;padding:11px;border-radius:6px;border:1px solid #c4d1cd}
+  button{cursor:pointer;background:#14695c;color:white;border:0}button:disabled{opacity:.45}
+  .secondary{background:#e4eeea;color:#193c31}.muted{color:#526c66;font-size:14px}
+  #frames{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px}
+  figure{margin:0}img{width:100%;border-radius:6px}figcaption{font-size:13px;color:#526c66}
+  pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:13px;max-height:500px;overflow:auto}
+  #status{min-height:24px}#decision{font-size:22px;font-weight:600}
+</style>
+<header><div><h1>Data Citadel</h1><p class="muted">原子操作数据审核 · 10 个任务</p></div><a href="/docs">API 文档</a></header>
+<main>
+  <section class="card"><h2>选择采集记录</h2>
+    <div class="row">
+      <label>动作类别<select id="action"></select></label>
+      <label style="flex:3">采集记录<select id="episode"></select></label>
+      <label>抽帧方案<select id="strategy"><option value="uniform">每 2 秒抽帧</option><option value="keyframes">夹爪事件关键帧</option></select></label>
+    </div>
+    <p id="instruction"></p><p id="reference" class="muted"></p>
+    <div class="row"><button id="preview" class="secondary">预览画面</button><button id="review">开始审核</button></div>
+    <p id="status" role="status" aria-live="polite"></p>
+  </section>
+  <section class="card" id="result" hidden><h2>审核结果</h2><p id="decision"></p><p id="reason"></p><details><summary>证据与完整结果</summary><pre id="details"></pre></details></section>
+  <section class="card" id="previewCard" hidden><h2>带时间戳的画面</h2><p id="samplingNote" class="muted"></p><div id="frames"></div></section>
+</main>
+<script>
+  const $ = id => document.getElementById(id);
+  let episodes = [];
+  const verdicts = {correct:'正确 · ground truth 候选',incorrect:'发现问题',uncertain:'无法确认 · 需要人工复核'};
+  async function api(path, options){
+    const response = await fetch(path, options);
+    const data = await response.json();
+    if(!response.ok) throw new Error(typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail || data));
+    return data;
+  }
+  function selection(){
+    const item = episodes.find(item => item.episode_id === $('episode').value);
+    $('instruction').textContent = item?.instruction || '';
+    $('reference').textContent = item ? `任务 ${item.task_code} · 既有人工标签 ${item.reference_label || '未标注'}` : '';
+    $('result').hidden = true; $('previewCard').hidden = true;
+  }
+  function filter(){
+    $('episode').replaceChildren(...episodes.filter(item => item.action_id === $('action').value).map(item => new Option(item.episode_id, item.episode_id)));
+    selection();
+  }
+  async function run(kind){
+    if(!$('episode').value) return;
+    $('preview').disabled = $('review').disabled = true;
+    $('status').textContent = kind === 'review' ? '正在审核，模型分析可能需要几分钟…' : '正在解码并抽帧…';
+    try {
+      const id = $('episode').value, strategy = $('strategy').value;
+      if(kind === 'review'){
+        const result = await api('/v1/reviews', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({episode_id:id,strategy})});
+        $('result').hidden = false; $('decision').textContent = verdicts[result.verdict];
+        $('reason').textContent = result.reason; $('details').textContent = JSON.stringify(result,null,2);
+      }else{
+        const result = await api(`/v1/episodes/${id}/frames?strategy=${strategy}&interval_s=2`);
+        $('previewCard').hidden = false;
+        $('samplingNote').textContent = `时长 ${result.duration_s.toFixed(2)} 秒 · ${result.frames.length} 帧 ${result.warnings.join('；')}`;
+        $('frames').replaceChildren(...result.frames.map(frame => {
+          const figure = document.createElement('figure'), img = document.createElement('img'), caption = document.createElement('figcaption');
+          img.src = frame.image; img.alt = `${frame.timestamp_s.toFixed(2)} 秒画面`; img.loading = 'lazy';
+          caption.textContent = `${frame.timestamp_s.toFixed(2)} 秒`; figure.append(img, caption); return figure;
+        }));
+      }
+      $('status').textContent = '完成';
+    }catch(error){$('status').textContent = error.message;}
+    finally{$('preview').disabled = $('review').disabled = false;}
+  }
+  $('action').addEventListener('change',filter); $('episode').addEventListener('change',selection);
+  $('preview').addEventListener('click',()=>run('preview')); $('review').addEventListener('click',()=>run('review'));
+  api('/v1/episodes').then(data=>{
+    episodes = data;
+    $('action').replaceChildren(...[...new Set(data.map(item=>item.action_id))].sort().map(id=>new Option(id,id)));
+    filter(); $('status').textContent = `${episodes.length} 条本地采集记录`;
+  }).catch(error=>{$('status').textContent=error.message;});
+</script>
+</html>
