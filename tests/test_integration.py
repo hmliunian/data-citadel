@@ -10,6 +10,7 @@ import pytest
 from data_citadel.api import create_app
 from data_citadel.experts import EXPERT_POLICY, ExpertLibrary
 from data_citadel.media import VideoSampler
+from data_citadel.media.sampling import WRIST_TOPICS
 from data_citadel.qwen import QwenClient
 from data_citadel.repository import EpisodeRepository
 from data_citadel.review.service import ReviewService
@@ -18,6 +19,7 @@ from test_media import TOPIC, synthetic_video
 from test_repository import bundle
 
 
+@pytest.mark.parametrize("camera_mode", ["main", "main_wrist"])
 @pytest.mark.parametrize("model_verdict,strategy,approved,expected,error_types", [
     ("correct", "uniform", True, "correct", []),
     ("uncertain", "uniform", True, "uncertain", []),
@@ -27,11 +29,12 @@ from test_repository import bundle
     ("incorrect", "uniform", False, "incorrect", ["blurred"]),
 ])
 def test_verified_mcap_experts_qwen_and_api_share_contracts(
-    tmp_path, monkeypatch, model_verdict, strategy, approved, expected, error_types,
+    tmp_path, monkeypatch, model_verdict, strategy, approved, expected, error_types, camera_mode,
 ):
     # Generated fixtures only: this approval cannot affect real expert manifests.
     monkeypatch.setenv("QWEN_API_KEY", "integration-fixture-key")
-    encoded = synthetic_video(tmp_path, frames=21, moving=True).mcap_path.read_bytes()
+    cameras = {TOPIC: 0, **dict.fromkeys(WRIST_TOPICS.values(), 0)}
+    encoded = synthetic_video(tmp_path, frames=21, moving=True, cameras=cameras).mcap_path.read_bytes()
     dataset = tmp_path / "dataset"
     ids = [f"{index:032x}" for index in range(6)]
     instructions = [f"拿起{object_name}。" for object_name in ("杯子", "书本", "瓶子", "毛巾", "玩具", "苹果")]
@@ -63,7 +66,8 @@ def test_verified_mcap_experts_qwen_and_api_share_contracts(
     }))
     settings = Settings(
         dataset_root=dataset, experts_path=manifest, artifacts_dir=tmp_path / "artifacts",
-        camera_topic=TOPIC, model="qwen-vl-max", base_url="https://fixture.invalid/v1",
+        camera_topic=TOPIC, camera_mode=camera_mode,
+        model="qwen-vl-max", base_url="https://fixture.invalid/v1",
     )
     requests = []
 
@@ -77,14 +81,14 @@ def test_verified_mcap_experts_qwen_and_api_share_contracts(
         assessment = {
             "verdict": verdict, "reason": "synthetic provider assessment",
             "confidence": 0.99, "complete": verdict != "uncertain",
-            "evidence": [{"timestamp_s": 0.0, "description": "start"},
-                         {"timestamp_s": 2.0, "description": "completion"}],
+            "evidence": [{"view": "main", "timestamp_s": 0.0, "description": "start"},
+                         {"view": "main", "timestamp_s": 2.0, "description": "completion"}],
         }
         if verdict == "incorrect":
             assessment["findings"] = [{
                 "code": "incomplete_action" if is_task else "blurred",
                 "reason": "visible fixture problem",
-                "evidence": [{"timestamp_s": 2.0, "description": "problem at end"}],
+                "evidence": [{"view": "main", "timestamp_s": 2.0, "description": "problem at end"}],
             }]
         return httpx.Response(200, json={"choices": [{
             "finish_reason": "stop", "message": {"content": json.dumps(assessment)},
@@ -105,7 +109,10 @@ def test_verified_mcap_experts_qwen_and_api_share_contracts(
     assert result["error_types"] == error_types
     assert result["provenance"]["expert_ids"] == (ids[:5] if approved else [])
     assert ids[-1] not in result["provenance"]["expert_ids"]
-    assert result["provenance"]["candidate_timestamps_s"] == [0.0, 2.0]
+    views = ["main"] if camera_mode == "main" else ["main", "left_wrist", "right_wrist"]
+    assert result["provenance"]["camera_mode"] == camera_mode
+    assert set(result["provenance"]["candidate_views"]) == set(views)
+    assert result["provenance"]["candidate_timestamps_s"] == sorted([0.0, 2.0] * len(views))
     assert len(requests) == (2 if approved else 1)
     for index, payload in enumerate(requests):
         content = payload["messages"][1]["content"]
@@ -114,7 +121,8 @@ def test_verified_mcap_experts_qwen_and_api_share_contracts(
         expected_instructions = instructions if index else instructions[-1:]
         assert [header["task_instruction"] for header in headers] == expected_instructions
         assert headers[-1]["video"] == "CANDIDATE"
-        assert sum(item["type"] == "image_url" for item in content) == (17 if index else 2)
+        task_images = 17 if camera_mode == "main" else 41
+        assert sum(item["type"] == "image_url" for item in content) == (task_images if index else 2)
     transmitted = json.dumps(requests)
     for private in ("private-person", "private-reviewer", "private-task", "private-evaluation-label", str(dataset), *ids):
         assert private not in transmitted

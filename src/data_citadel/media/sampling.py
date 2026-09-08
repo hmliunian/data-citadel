@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import base64
-from dataclasses import asdict
+from dataclasses import asdict, replace
 import hashlib
 from io import BytesIO
 import json
@@ -14,6 +14,13 @@ import numpy as np
 
 from ..models import Episode, Frame, MediaError, SampledVideo
 from .mcap_reader import decode_video, inspect_mcap, read_grippers
+
+
+WRIST_TOPICS = {
+    "left_wrist": "/camera/coracam_lefthand/left_h264/video",
+    "right_wrist": "/camera/coracam_righthand/left_h264/video",
+}
+WRIST_INTERVAL_S = 2.0
 
 
 def gripper_event_times(samples: list[tuple[float, float]]) -> list[float]:
@@ -97,11 +104,14 @@ class _Motion:
 
 class VideoSampler:
     def __init__(self, camera_topic: str, max_frames: int = 96, max_image_size: int = 768,
-                 cache_dir: Path | None = None):
+                 cache_dir: Path | None = None, camera_mode: str = "main"):
         if max_frames < 2 or max_image_size < 32:
             raise ValueError("Need at least two frames and images of at least 32 pixels")
         self.camera_topic, self.max_frames, self.max_image_size = camera_topic, max_frames, max_image_size
         self.cache_dir = Path(cache_dir) if cache_dir is not None else None
+        if camera_mode not in ("main", "main_wrist"):
+            raise ValueError("Expected camera mode main/main_wrist")
+        self.camera_mode = camera_mode
 
     def _frame(self, time_s: float, decoded) -> Frame:
         image = decoded.to_image()
@@ -119,7 +129,48 @@ class VideoSampler:
                           self.max_image_size, strategy, interval_s])
         return self.cache_dir / (hashlib.sha256(key.encode()).hexdigest() + ".json")
 
-    def sample(self, episode: Episode, strategy: str = "uniform", interval_s: float = 2.0) -> SampledVideo:
+    def sample(self, episode: Episode, strategy: str = "uniform", interval_s: float = 2.0,
+               camera_mode: str | None = None) -> SampledVideo:
+        mode = self.camera_mode if camera_mode is None else camera_mode
+        if mode not in ("main", "main_wrist"):
+            raise ValueError("Expected camera mode main/main_wrist")
+        main = self._sample_single(episode, strategy, interval_s)
+        if mode == "main":
+            return main
+        inspection = inspect_mcap(episode.mcap_path, list(WRIST_TOPICS.values()))
+        videos = {"main": main}
+        views, warnings = {}, []
+        for view, topic in {"main": self.camera_topic, **WRIST_TOPICS}.items():
+            view_interval = interval_s if view == "main" else max(interval_s, WRIST_INTERVAL_S)
+            unavailable = (
+                "missing_camera_topic" if topic in inspection["missing_required_channels"] else
+                "empty_camera_topic" if topic in inspection["empty_required_channels"] else None
+            )
+            if unavailable:
+                views[view] = {"topic": topic, "interval_s": view_interval, "duration_s": None,
+                               "timestamps_s": [], "warnings": [unavailable], "motion": {}}
+                warnings.append(f"{view}: {unavailable}")
+                continue
+            if view != "main":
+                videos[view] = VideoSampler(
+                    topic, self.max_frames, self.max_image_size, self.cache_dir,
+                )._sample_single(episode, strategy, view_interval)
+            video = videos[view]
+            views[view] = {
+                "topic": topic, "interval_s": view_interval, "duration_s": video.duration_s,
+                "timestamps_s": [frame.timestamp_s for frame in video.frames],
+                "warnings": video.warnings, "motion": video.motion,
+            }
+            warnings.extend(warning if view == "main" else f"{view}: {warning}"
+                            for warning in video.warnings)
+        frames = [replace(frame, view=view) for view, video in videos.items() for frame in video.frames]
+        return SampledVideo(
+            sorted(frames, key=lambda frame: (frame.timestamp_s, frame.view)),
+            max(video.duration_s for video in videos.values()), self.camera_topic, strategy,
+            warnings, {**main.motion, "views": views},
+        )
+
+    def _sample_single(self, episode: Episode, strategy: str, interval_s: float) -> SampledVideo:
         if strategy not in ("uniform", "keyframes") or not np.isfinite(interval_s) or interval_s <= 0:
             raise ValueError("Expected uniform/keyframes and a positive finite interval")
         cache = self._cache_path(episode, strategy, interval_s)

@@ -4,7 +4,7 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .models import ProviderError
+from .models import CameraMode, ProviderError
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
@@ -26,6 +26,9 @@ class Settings:
     ))
     camera_topic: str = field(default_factory=lambda: os.environ.get(
         "CITADEL_CAMERA_TOPIC", "/camera/coracam_head/left_h264/video"
+    ))
+    camera_mode: CameraMode = field(default_factory=lambda: os.environ.get(
+        "CITADEL_CAMERA_MODE", "main"
     ))
     request_timeout_s: float = 120.0
     max_retries: int = 2

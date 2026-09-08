@@ -7,7 +7,8 @@ from datetime import datetime, timezone
 from .. import __version__
 from ..experts import EXPERT_POLICY
 from ..media.mcap_reader import inspect_mcap
-from ..models import Assessment, ExpertError, ProviderError, ReviewResult
+from ..media.sampling import WRIST_INTERVAL_S
+from ..models import Assessment, ExpertError, ProviderError, ReviewResult, SampledVideo
 from ..prompts import PROMPT_VERSION
 from ..repository import dotted_get
 from ..settings import Settings
@@ -23,8 +24,11 @@ class ReviewService:
         self.client = client
         self.settings = settings
 
-    def review(self, episode_id: str, strategy: str = "uniform") -> ReviewResult:
+    def review(
+        self, episode_id: str, strategy: str = "uniform", camera_mode: str | None = None,
+    ) -> ReviewResult:
         episode = self.repository.get(episode_id)
+        camera_mode = self.settings.camera_mode if camera_mode is None else camera_mode
         provenance = {
             "created_at": datetime.now(timezone.utc).isoformat(),
             "engine_version": __version__,
@@ -32,8 +36,11 @@ class ReviewService:
             "policy_version": POLICY_VERSION,
             "model": self.settings.model,
             "strategy": strategy,
+            "camera_mode": camera_mode,
             "candidate_interval_s": 2.0,
             "expert_interval_s": 1.0,
+            "candidate_wrist_interval_s": WRIST_INTERVAL_S,
+            "expert_wrist_interval_s": WRIST_INTERVAL_S,
             "camera_topic": self.settings.camera_topic,
             "max_image_size": self.settings.max_image_size,
             "max_frames_per_video": self.settings.max_frames,
@@ -55,7 +62,9 @@ class ReviewService:
         if assessments["integrity"].verdict != "correct":
             return self._result(episode, assessments, provenance)
 
-        candidate = self.sampler.sample(episode, strategy=strategy, interval_s=2.0)
+        candidate = self.sampler.sample(
+            episode, strategy=strategy, interval_s=2.0, camera_mode=camera_mode,
+        )
         expert_episodes = []
         try:
             expert_episodes = self.experts.resolve(episode)
@@ -75,7 +84,9 @@ class ReviewService:
             for item in expert_episodes
         ]
         expert_videos = [
-            (item.instruction, self.sampler.sample(item, strategy="uniform", interval_s=1.0))
+            (item.instruction, self.sampler.sample(
+                item, strategy="uniform", interval_s=1.0, camera_mode=camera_mode,
+            ))
             for item in expert_episodes
         ]
         warnings = [*candidate.warnings]
@@ -86,13 +97,19 @@ class ReviewService:
         provenance["candidate_timestamps_s"] = [item.timestamp_s for item in candidate.frames]
         provenance["candidate_duration_s"] = candidate.duration_s
         provenance["candidate_motion"] = candidate.motion
+        provenance["candidate_views"] = _view_sources(candidate)
         provenance["expert_timestamps_s"] = {
             item.episode_id: [frame.timestamp_s for frame in video.frames]
             for item, (_, video) in zip(expert_episodes, expert_videos, strict=True)
         }
+        provenance["expert_views"] = {
+            item.episode_id: _view_sources(video)
+            for item, (_, video) in zip(expert_episodes, expert_videos, strict=True)
+        }
         provenance["warnings"] = warnings
-        # Check the larger request first to avoid spending on an unusable review.
-        total_frames = len(candidate.frames) + sum(len(video.frames) for _, video in expert_videos)
+        # Check the largest actual request before spending on the generic call.
+        total_frames = (len(candidate.frames) + sum(len(video.frames) for _, video in expert_videos)
+                        if expert_videos else sum(frame.view == "main" for frame in candidate.frames))
         if total_frames > self.settings.max_request_images:
             raise ProviderError("image_budget_exceeded: raise max_request_images or select shorter clips")
         assessments["generic"] = self.client.assess_generic(episode.instruction, candidate)
@@ -105,3 +122,14 @@ class ReviewService:
             episode, assessments, threshold=self.settings.correct_threshold,
             warnings=warnings, provenance=provenance,
         )
+
+
+def _view_sources(video: SampledVideo) -> dict:
+    sources = video.motion.get("views", {})
+    return {
+        view: {
+            "topic": sources.get(view, {}).get("topic", video.camera_topic if view == "main" else None),
+            "timestamps_s": [frame.timestamp_s for frame in video.frames if frame.view == view],
+        }
+        for view in sorted({frame.view for frame in video.frames} | sources.keys())
+    }

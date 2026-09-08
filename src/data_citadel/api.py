@@ -6,12 +6,14 @@ from importlib.resources import files
 from typing import Literal
 
 from fastapi import FastAPI, Query, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from pydantic import Field
 
 from . import __version__
+from .media.sampling import WRIST_TOPICS
+from .media.video import export_video
 from .models import (
-    CitadelError, DatasetError, EpisodeNotFound, ExpertError, MediaError,
+    CameraView, CameraMode, CitadelError, DatasetError, EpisodeNotFound, ExpertError, MediaError,
     ProviderError, ReviewResult, StrictModel,
 )
 from .runtime import build_service, episode_summary, save_review
@@ -21,6 +23,7 @@ from .settings import Settings
 class ReviewRequest(StrictModel):
     episode_id: str = Field(pattern=r"^[0-9a-f]{32}$")
     strategy: Literal["uniform", "keyframes"] = "uniform"
+    camera_mode: CameraMode | None = None
 
 
 def create_app(settings: Settings | None = None, service=None) -> FastAPI:
@@ -52,7 +55,7 @@ def create_app(settings: Settings | None = None, service=None) -> FastAPI:
 
     @app.get("/health")
     def health():
-        return {"status": "ok", "version": __version__}
+        return {"status": "ok", "version": __version__, "camera_mode": settings.camera_mode}
 
     @app.get("/v1/inventory")
     def inventory():
@@ -67,21 +70,44 @@ def create_app(settings: Settings | None = None, service=None) -> FastAPI:
         episode_id: str,
         strategy: Literal["uniform", "keyframes"] = "uniform",
         interval_s: float = Query(default=1.0, ge=0.1, le=10.0),
+        camera_mode: CameraMode | None = None,
     ):
         episode = service.repository.get(episode_id)
-        video = service.sampler.sample(episode, strategy=strategy, interval_s=interval_s)
+        video = service.sampler.sample(
+            episode, strategy=strategy, interval_s=interval_s,
+            camera_mode=camera_mode or settings.camera_mode,
+        )
+        starts = {}
+        for frame in video.frames:
+            starts.setdefault(frame.view, frame.timestamp_s)
         return {
             "duration_s": video.duration_s, "strategy": video.strategy,
+            "camera_mode": camera_mode or settings.camera_mode,
             "warnings": video.warnings, "motion": video.motion,
+            "videos": {view: {
+                "url": f"/v1/episodes/{episode_id}/video?view={view}", "start_s": start,
+            } for view, start in starts.items()},
             "frames": [{
-                "timestamp_s": frame.timestamp_s,
+                "timestamp_s": frame.timestamp_s, "view": frame.view,
                 "image": "data:image/jpeg;base64," + base64.b64encode(frame.jpeg).decode("ascii"),
             } for frame in video.frames],
         }
 
+    @app.get("/v1/episodes/{episode_id}/video")
+    def video(episode_id: str, view: CameraView = "main"):
+        episode = service.repository.get(episode_id)
+        topic = settings.camera_topic if view == "main" else WRIST_TOPICS[view]
+        path = export_video(episode, topic, settings.artifacts_dir / "videos")
+        return FileResponse(
+            path, media_type="video/mp4", filename=f"{episode_id}.{view}.mp4",
+            content_disposition_type="inline",
+        )
+
     @app.post("/v1/reviews", response_model=ReviewResult)
     def review(body: ReviewRequest):
-        result = service.review(body.episode_id, strategy=body.strategy)
+        result = service.review(
+            body.episode_id, strategy=body.strategy, camera_mode=body.camera_mode,
+        )
         save_review(result, settings.artifacts_dir)
         return result
 

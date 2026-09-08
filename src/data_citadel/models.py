@@ -7,6 +7,8 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 Verdict = Literal["correct", "incorrect", "uncertain"]
+CameraMode = Literal["main", "main_wrist"]
+CameraView = Literal["main", "left_wrist", "right_wrist"]
 ErrorType = Literal[
     "data_missing", "blurred", "content_mismatch", "incomplete_action",
     "repeated_retry", "annotation_error", "other",
@@ -39,6 +41,7 @@ class Episode:
 class Frame:
     timestamp_s: float
     jpeg: bytes = field(repr=False)
+    view: CameraView = "main"
 
 
 @dataclass(frozen=True)
@@ -56,6 +59,7 @@ class StrictModel(BaseModel):
 
 
 class Evidence(StrictModel):
+    view: CameraView | None = None
     timestamp_s: float | None = Field(default=None, ge=0)
     description: str = Field(min_length=1)
 

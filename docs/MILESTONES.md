@@ -52,3 +52,31 @@
 A_002 的通用和任务模型分项已返回正确，但候选帧间隙及两条专家边界覆盖警告阻止最终放行；这不是缺少专家，也没有证明模型能识别该样本的标注错误。A_003 无采样警告，任务理由明确对照了专家 4 的搬运演示。
 
 两次真实完整审核的结构化记录见 artifacts/checks/atomic-action-v2-live.json（忽略提交）。这是链路实测，不是完整分类准确率验证，也不能证明零误判。
+
+## M5：腕部多视角接口、成对诊断与分路预览
+
+本轮算法面向 FastAPI 与批量调用，不依赖打开网页。审核接口增加 camera_mode=main/main_wrist；通用审核仅主视角画质，任务审核可结合主视角和双腕。模型输出的 view 与时间必须对应候选该路实际帧，任务 correct 仍需两个不同主视角时刻；通用审核越界输出任务类错误会报运行错误，不能误当 confirmed negative。
+
+MCAP 中主/左腕/右腕均选 left_h264。专家主视角保留 1 秒抽帧，补充腕部按 2 秒；待测仍 2 秒或夹爪事件帧。A_009 的任务请求从 300 张降至 216 张，未提高 250 张预算或去掉覆盖警告。keyframes 仍按夹爪事件选帧，2 秒只适用于 uniform 或无事件时回退，超预算仍会提前报错。
+
+从已有完整审核记录锁定五条非专家诊断样本。通过 scripts/compare_views.py 向同一 FastAPI 发起 10 次真实审核，模型、提示词、专家配置及策略固定，均为 HTTP 200，5 对全部可比，操作错误为 0。逐字节离线核验这五对 generic 输入相同（含图片和时长）。
+
+| 动作 / 记录前缀 | 原人工 GT | 新版 main Predict | 新版 main_wrist Predict |
+| --- | --- | --- | --- |
+| A_001 / 274728c6 | blurred | content_mismatch | content_mismatch |
+| A_002 / 005b3292 | annotation_error | uncertain | uncertain |
+| A_003 / 171f0ddc | correct | correct | correct |
+| A_009 / 8656885a | annotation_error | content_mismatch | content_mismatch |
+| A_012 / 178b2d30 | correct | correct | uncertain |
+
+单标签匹配 main 为 2/5、main_wrist 为 1/5；两模式均未把本批三条 GT 错误样本放行为 correct。这不是总体准确率或零误判保证，也没有证明腕部提升了最终分类。A_012 多视角的两个模型分项都正确，但专家左腕帧间隙警告阻止放行。因此默认继续 main，多视角作为显式可选模式，不根据 GT 擅自抹去警告或改标签。历史 A_009 曾使用 keyframes，不能把历史结果变化当成纯视角提升。
+
+腕部确实补充了可见细节：A_002 的模型证据引用右腕 0.034517 秒看到橙色外观与绿色蒂部；A_009 引用右腕 1.994189 秒说明抹布颜色与指令不一致，但仍未匹配人工 annotation_error 细类。A_001 的 blurred 也仍未正确分类。其他独立测试样本不用于本轮调参。
+
+原始请求、响应、耗时和 summary.json 保存在 artifacts/paired-wrist-v1-20260908/（忽略提交）。通用时长另补主视角独立 duration 回归，防止其他样本的腕部末帧影响两模式 generic 输入；这五条实测不受该潜在边界影响。
+
+网页已按主视角、左腕 Wrist、右腕 Wrist 分组展示抽样/事件关键帧和对应视频。新增按固定视角读取的视频接口，连续解码 MCAP 后导出原分辨率 H.264/yuv420p MP4，保留真实帧间隔、启用 faststart 和 Range，完成后原子写入缓存。点击帧按该路首帧偏移定位，切换记录清理旧播放器，过期预览或单路视频失败不会串路；GT 在上、单个 Predict 在下的约定保持不变。负首帧时间或不支持的分辨率会明确报错，不静默扭曲时间或缩放。
+
+验证：全量 CITADEL_REAL_MCAP=1 .venv/bin/python -m pytest -q 得到 **221 passed**，包含 13 项前端行为回归、真实三路 MP4 的逐帧时间/关键帧定位/Range API 测试，以及 B 帧、非等间隔、坏流和缓存测试。Ruff check src tests scripts 与 git diff --check 通过；仅有两条既有测试依赖弃用提示，无新增依赖。复用已有 MCAP 解码器和单路采样器，符合 concise-code 约束。
+
+新版服务已在本地 8000 启动，实际 HTTP 检查：首页三路分组、health 默认 main、A_002 005b…的各路 4 张帧和独立视频地址均正常，三路视频 Range 请求均返回 206 / 64 字节。此次工程回归与播放检查不调用 Qwen；模型效果以本节五对真实诊断为准。

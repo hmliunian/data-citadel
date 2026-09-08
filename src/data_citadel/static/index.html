@@ -14,7 +14,11 @@
   select,button{font:inherit;padding:11px;border-radius:6px;border:1px solid #c4d1cd}
   button{cursor:pointer;background:#14695c;color:white;border:0}button:disabled{opacity:.45}
   .secondary{background:#e4eeea;color:#193c31}.muted{color:#526c66;font-size:14px}
-  #frames{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px}
+  #frames{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px}
+  .camera-view{min-width:0}.camera-view h3{font-size:17px}.camera-view video{width:100%;background:#111;border-radius:6px}
+  .view-frames{display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:10px;margin-top:14px}
+  .frame-link{display:block;width:100%;padding:0;background:transparent;color:inherit;text-align:left}
+  @media(max-width:760px){#frames{grid-template-columns:1fr}}
   figure{margin:0}img{width:100%;border-radius:6px}figcaption{font-size:13px;color:#526c66}
   pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:13px;max-height:500px;overflow:auto}
   #status{min-height:24px}#decision{font-size:22px;font-weight:600}
@@ -26,18 +30,20 @@
     <div class="row">
       <label>原子任务（动作类别）<select id="action"></select></label>
       <label style="flex:3">采集记录<select id="episode"></select></label>
-      <label>抽帧方案<select id="strategy"><option value="uniform">每 2 秒抽帧</option><option value="keyframes">夹爪事件关键帧</option></select></label>
+      <label>抽帧方案<select id="strategy"><option value="uniform">均匀抽帧（每 2 秒）</option><option value="keyframes">夹爪事件优先（可回退均匀）</option></select></label>
+      <label>审核视角<select id="reviewMode"><option value="main">主视角</option><option value="main_wrist">主视角 + 双腕（实验）</option></select></label>
     </div>
     <p id="instruction"></p><p id="reference" class="muted"></p><p id="groundTruth" class="truth"></p>
     <div class="row"><button id="preview" class="secondary">预览画面</button><button id="review">开始审核</button></div>
     <p id="status" role="status" aria-live="polite"></p>
   </section>
   <section class="card" id="result" hidden><h2>模型审核结果</h2><p id="resultGroundTruth" class="truth"></p><p id="decision"></p><p id="reason"></p><p id="expertNote" class="muted"></p><details><summary>专家参考与 Qwen 任务判断</summary><ol id="expertList"></ol><p id="taskAssessment"></p></details><details><summary>证据与完整结果</summary><p id="qwenLabels" class="muted"></p><pre id="details"></pre></details></section>
-  <section class="card" id="previewCard" hidden><h2>带时间戳的画面</h2><p id="samplingNote" class="muted"></p><div id="frames"></div></section>
+  <section class="card" id="previewCard" hidden><h2>三路视频与抽样帧</h2><p id="samplingNote" class="muted"></p><div id="frames"></div></section>
 </main>
 <script>
   const $ = id => document.getElementById(id);
-  let episodes = [];
+  let episodes = [], previewVersion = 0;
+  const viewNames = {main:'主视角',left_wrist:'左腕 Wrist',right_wrist:'右腕 Wrist'};
   const labelNames = {correct:'正确',incorrect:'错误',uncertain:'无法确认',data_missing:'数据缺失',blurred:'画面模糊',content_mismatch:'采集内容不符合要求',incomplete_action:'动作不完整',repeated_retry:'反复重试',retry_then_success:'反复重试',annotation_error:'标注信息错误',other:'其他问题'};
   function labelText(label){
     return `${labelNames[label] || label}（${label}）`;
@@ -58,12 +64,73 @@
     if(!response.ok) throw new Error(typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail || data));
     return data;
   }
+  function clearPreview(){
+    previewVersion++;
+    $('frames').querySelectorAll('video').forEach(video => {
+      video.pause(); video.onloadedmetadata = null;
+      video.removeAttribute('src'); video.load();
+    });
+    $('frames').replaceChildren();
+    $('previewCard').hidden = true;
+    return previewVersion;
+  }
+  function seekFrame(video, timestamp, start){
+    const seek = () => {
+      video.onloadedmetadata = null;
+      video.currentTime = Math.max(0, timestamp - start);
+      video.pause();
+    };
+    video.pause();
+    if(video.readyState >= 1) seek();
+    else {video.onloadedmetadata = seek; video.load();}
+  }
+  function renderPreview(result){
+    $('previewCard').hidden = false;
+    const method = result.strategy === 'keyframes' ? '事件优先抽帧（可能回退均匀）' : '均匀抽帧';
+    $('samplingNote').textContent = method + ' · 时长 ' + result.duration_s.toFixed(2) + ' 秒 · ' + result.frames.length + ' 帧 ' + result.warnings.join('；');
+    $('frames').replaceChildren(...Object.entries(viewNames).map(([view, title]) => {
+      const section = document.createElement('section'), heading = document.createElement('h3');
+      section.className = 'camera-view'; section.dataset.view = view;
+      heading.textContent = title; section.append(heading);
+      const source = result.videos?.[view];
+      let video;
+      if(source?.url){
+        video = document.createElement('video');
+        video.controls = true; video.preload = 'none'; video.src = source.url;
+        video.title = title + ' · 对应视频'; video.dataset.view = view;
+        const failure = document.createElement('p');
+        failure.className = 'muted'; failure.hidden = true;
+        failure.textContent = title + '：对应视频载入失败，请重试。';
+        video.addEventListener('error', () => {failure.hidden = false;});
+        section.append(video, failure);
+      }else{
+        const unavailable = document.createElement('p');
+        unavailable.className = 'muted'; unavailable.textContent = '该路对应视频不可用。'; section.append(unavailable);
+      }
+      const frames = result.frames.filter(frame => frame.view === view);
+      const grid = document.createElement('div'); grid.className = 'view-frames';
+      grid.append(...frames.map(frame => {
+        const figure = document.createElement('figure'), jump = document.createElement('button');
+        const img = document.createElement('img'), caption = document.createElement('figcaption');
+        img.src = frame.image; img.alt = title + ' ' + frame.timestamp_s.toFixed(2) + ' 秒画面'; img.loading = 'lazy';
+        jump.className = 'frame-link'; jump.type = 'button';
+        jump.disabled = !video || !Number.isFinite(source.start_s);
+        jump.addEventListener('click', () => seekFrame(video, frame.timestamp_s, source.start_s));
+        caption.textContent = frame.timestamp_s.toFixed(2) + ' 秒';
+        jump.append(img); figure.append(jump, caption); return figure;
+      }));
+      if(!frames.length && video) grid.textContent = '该路暂无抽样帧。';
+      section.append(grid); return section;
+    }));
+  }
   function selection(){
     const item = episodes.find(item => item.episode_id === $('episode').value);
     $('instruction').textContent = item?.instruction || '';
     $('reference').textContent = item ? `原子任务 ${item.action_id} · 原始指令编号 ${item.task_code}` : '';
     $('groundTruth').textContent = groundTruthText(item);
-    $('result').hidden = true; $('previewCard').hidden = true;
+    $('result').hidden = true;
+    clearPreview();
+    $('status').textContent = '';
   }
   function filter(){
     $('episode').replaceChildren(...episodes.filter(item => item.action_id === $('action').value).map(item => new Option(item.episode_id, item.episode_id)));
@@ -72,12 +139,13 @@
   async function run(kind){
     if(!$('episode').value) return;
     $('preview').disabled = $('review').disabled = true;
-    $(kind === 'review' ? 'result' : 'previewCard').hidden = true;
+    const previewRequest = kind === 'preview' ? clearPreview() : null;
+    if(kind === 'review') $('result').hidden = true;
     $('status').textContent = kind === 'review' ? '正在审核，模型分析可能需要几分钟…' : '正在解码并抽帧…';
     try {
       const id = $('episode').value, strategy = $('strategy').value;
       if(kind === 'review'){
-        const result = await api('/v1/reviews', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({episode_id:id,strategy})});
+        const result = await api('/v1/reviews', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({episode_id:id,strategy,camera_mode:$('reviewMode').value})});
         $('result').hidden = false;
         $('decision').textContent = 'Predict（最终审核标签）：' + reviewLabel(result);
         $('resultGroundTruth').textContent = groundTruthText(episodes.find(item => item.episode_id === result.episode_id));
@@ -96,18 +164,14 @@
         $('taskAssessment').textContent = task ? `${taskLabel}（${task.verdict}）：${task.reason}；最终结论仍以上方严格审核结果为准。` : '任务审核尚未执行。';
         $('details').textContent = JSON.stringify(result,null,2);
       }else{
-        const result = await api(`/v1/episodes/${id}/frames?strategy=${strategy}&interval_s=2`);
-        $('previewCard').hidden = false;
-        $('samplingNote').textContent = `时长 ${result.duration_s.toFixed(2)} 秒 · ${result.frames.length} 帧 ${result.warnings.join('；')}`;
-        $('frames').replaceChildren(...result.frames.map(frame => {
-          const figure = document.createElement('figure'), img = document.createElement('img'), caption = document.createElement('figcaption');
-          img.src = frame.image; img.alt = `${frame.timestamp_s.toFixed(2)} 秒画面`; img.loading = 'lazy';
-          caption.textContent = `${frame.timestamp_s.toFixed(2)} 秒`; figure.append(img, caption); return figure;
-        }));
+        const result = await api('/v1/episodes/' + id + '/frames?strategy=' + strategy + '&interval_s=2&camera_mode=main_wrist');
+        if(previewRequest !== previewVersion) return;
+        renderPreview(result);
       }
       $('status').textContent = '完成';
-    }catch(error){$('status').textContent = error.message;}
-    finally{$('preview').disabled = $('review').disabled = false;}
+    }catch(error){
+      if(kind !== 'preview' || previewRequest === previewVersion) $('status').textContent = error.message;
+    }finally{$('preview').disabled = $('review').disabled = false;}
   }
   $('action').addEventListener('change',filter); $('episode').addEventListener('change',selection);
   $('preview').addEventListener('click',()=>run('preview')); $('review').addEventListener('click',()=>run('review'));

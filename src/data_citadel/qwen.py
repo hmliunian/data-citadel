@@ -3,17 +3,20 @@
 from __future__ import annotations
 
 import base64
+from dataclasses import replace
 import json
 import math
 import time
 from collections.abc import Sequence
-from typing import Any
+from typing import Any, get_args
 
 import httpx
 
-from .models import Assessment, ProviderError, SampledVideo
+from .models import Assessment, CameraView, ProviderError, SampledVideo
 from .prompts import COMMON, GENERIC, TASK
 from .settings import Settings
+
+GENERIC_CODES = ("blurred", "other")
 
 
 class QwenClient:
@@ -27,7 +30,12 @@ class QwenClient:
             self._client.close()
 
     def assess_generic(self, instruction: str, video: SampledVideo) -> Assessment:
-        return self._assess(instruction, video, (), GENERIC)
+        source = video.motion.get("views", {}).get("main", {})
+        main = replace(
+            video, frames=[frame for frame in video.frames if frame.view == "main"],
+            duration_s=source.get("duration_s", video.duration_s),
+        )
+        return self._assess(instruction, main, (), GENERIC)
 
     def assess_task(
         self, instruction: str, video: SampledVideo,
@@ -48,6 +56,15 @@ class QwenClient:
             raise ProviderError("image_budget_exceeded: raise max_request_images or select shorter clips")
         for item in videos:
             self._validate_video(item)
+        multiview = any(frame.view != "main" for item in videos for frame in item.frames)
+        schema = Assessment.model_json_schema()
+        if multiview:
+            evidence_schema = schema["$defs"]["Evidence"]
+            evidence_schema["required"].append("view")
+            evidence_schema["properties"]["view"] = {"type": "string", "enum": list(get_args(CameraView))}
+        if prompt == GENERIC:
+            schema["$defs"]["Finding"]["properties"]["code"]["enum"] = list(GENERIC_CODES)
+            schema["properties"]["retry_outcome"]["enum"] = ["none"]
 
         content: list[dict[str, Any]] = []
         for index, (expert_instruction, expert) in enumerate(experts, 1):
@@ -56,11 +73,8 @@ class QwenClient:
         payload = {
             "model": self.settings.model,
             "messages": [
-                {
-                    "role": "system",
-                    "content": COMMON + prompt + "\nJSON Schema:\n"
-                    + json.dumps(Assessment.model_json_schema(), ensure_ascii=False),
-                },
+                {"role": "system", "content": COMMON + prompt + "\nJSON Schema:\n"
+                 + json.dumps(schema, ensure_ascii=False)},
                 {"role": "user", "content": content},
             ],
             # Qwen-VL-Max supports JSON object mode, not strict JSON Schema mode.
@@ -80,10 +94,13 @@ class QwenClient:
         except (ValueError, TypeError, KeyError, IndexError, AttributeError):
             raise ProviderError("invalid_or_incomplete_model_response") from None
 
-        observed_times = {frame.timestamp_s for frame in video.frames}
+        observed = {
+            view: {frame.timestamp_s for frame in video.frames if frame.view == view}
+            for view in {frame.view for frame in video.frames}
+        }
         if prompt == GENERIC:
             for interval in video.motion.get("stationary_intervals", []):
-                observed_times.update(
+                observed["main"].update(
                     value for key in ("start_s", "end_s")
                     if isinstance(value := interval.get(key), (int, float))
                     and math.isfinite(value) and 0 <= value <= video.duration_s
@@ -97,21 +114,33 @@ class QwenClient:
                 or not 0 <= item.timestamp_s <= video.duration_s + 1e-3
             ):
                 raise ProviderError("model_evidence_outside_candidate_timeline")
-            nearest = min(observed_times, key=lambda value: abs(value - item.timestamp_s))
+            if item.view is None and multiview:
+                raise ProviderError("multiview_model_evidence_requires_view")
+            view = item.view or "main"
+            if view not in observed:
+                raise ProviderError("model_evidence_view_not_observed_in_candidate")
+            nearest = min(observed[view], key=lambda value: abs(value - item.timestamp_s))
             if abs(nearest - item.timestamp_s) > 1e-3:
-                raise ProviderError("model_evidence_not_observed_in_candidate")
-            # Normalize millisecond display rounding to the actual source timestamp.
-            item.timestamp_s = nearest
+                raise ProviderError("model_evidence_not_observed_in_candidate_view")
+            # Normalize millisecond rounding only within the declared source view.
+            item.view, item.timestamp_s = view, nearest
+        if prompt == GENERIC:
+            if any(finding.code not in GENERIC_CODES for finding in assessment.findings):
+                raise ProviderError("generic_review_invalid_finding_code")
+            if assessment.retry_outcome != "none":
+                raise ProviderError("generic_review_must_not_classify_retry_outcome")
         return assessment
 
     @staticmethod
     def _validate_video(video: SampledVideo) -> None:
         if not video.frames or not math.isfinite(video.duration_s) or video.duration_s < 0:
             raise ProviderError("invalid_sampled_video")
+        if not any(frame.view == "main" for frame in video.frames):
+            raise ProviderError("main_camera_frames_required")
         previous = 0.0
         for frame in video.frames:
             if (
-                not math.isfinite(frame.timestamp_s)
+                frame.view not in get_args(CameraView) or not math.isfinite(frame.timestamp_s)
                 or not previous <= frame.timestamp_s <= video.duration_s or not frame.jpeg
             ):
                 raise ProviderError("invalid_sampled_video")
@@ -122,9 +151,13 @@ class QwenClient:
         # Explicit allowlist: never serialize Episode, metadata, paths or labels.
         header: dict[str, Any] = {
             "video": name, "task_instruction": instruction, "duration_s": video.duration_s,
-            "sampled_timestamps_s": [frame.timestamp_s for frame in video.frames],
+            "sampled_timestamps_by_view": {
+                view: [frame.timestamp_s for frame in video.frames if frame.view == view]
+                for view in sorted({frame.view for frame in video.frames})
+            },
         }
         if name == "CANDIDATE":
+            header["motion_view"] = "main"
             header["motion"] = {
                 key: video.motion[key]
                 for key in (
@@ -137,7 +170,8 @@ class QwenClient:
             {"type": "text", "text": json.dumps(header, ensure_ascii=False)}
         ]
         for frame in video.frames:
-            content.append({"type": "text", "text": f"{name} timestamp_s={frame.timestamp_s}"})
+            content.append({"type": "text", "text":
+                            f"{name} view={frame.view} timestamp_s={frame.timestamp_s}"})
             encoded = base64.b64encode(frame.jpeg).decode("ascii")
             content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{encoded}"}})
         return content

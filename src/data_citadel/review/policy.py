@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from ..models import Assessment, Episode, Finding, ReviewResult
 
-POLICY_VERSION = "strict-atomic-v1"
+POLICY_VERSION = "strict-atomic-v2-main-evidence"
 
 
 def decide(
@@ -84,5 +84,8 @@ def _passes(assessment: Assessment, threshold: float, stage: str) -> bool:
     timestamps = {item.timestamp_s for item in assessment.evidence}
     if None in timestamps:
         return False
-    # Task acceptance requires observation of the process and completion, at distinct times.
+    if stage == "task":
+        # Wrist close-ups cannot replace main-view process and completion evidence.
+        timestamps = {item.timestamp_s for item in assessment.evidence
+                      if item.view in (None, "main")}
     return len(timestamps) >= (2 if stage == "task" else 1)

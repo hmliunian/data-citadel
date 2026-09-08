@@ -19,6 +19,7 @@ def main(argv=None) -> int:
     parser.add_argument("--dataset-root", type=Path)
     parser.add_argument("--experts", type=Path)
     parser.add_argument("--artifacts-dir", type=Path)
+    parser.add_argument("--camera-mode", choices=["main", "main_wrist"])
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("inventory", help="统计本地样本及专家集缺额")
     prepare = commands.add_parser("prepare", help="按原子动作生成专家与独立测试清单")
@@ -41,7 +42,7 @@ def main(argv=None) -> int:
     serve.add_argument("--port", type=int, default=8000)
     args = parser.parse_args(argv)
     settings = Settings()
-    overrides = {name: getattr(args, name) for name in ["dataset_root", "artifacts_dir"]
+    overrides = {name: getattr(args, name) for name in ["dataset_root", "artifacts_dir", "camera_mode"]
                  if getattr(args, name) is not None}
     if args.experts:
         overrides["experts_path"] = args.experts
@@ -76,9 +77,10 @@ def main(argv=None) -> int:
             for index, frame in enumerate(video.frames):
                 filename = f"{index:04d}.jpg"
                 (args.output_dir / filename).write_bytes(frame.jpeg)
-                frames.append({"timestamp_s": frame.timestamp_s, "file": filename})
+                frames.append({"timestamp_s": frame.timestamp_s, "view": frame.view, "file": filename})
             output = {"episode_id": episode.episode_id, "duration_s": video.duration_s,
                       "strategy": video.strategy, "camera_topic": video.camera_topic,
+                      "camera_mode": settings.camera_mode,
                       "warnings": video.warnings, "motion": video.motion, "frames": frames}
             write_json(args.output_dir / "frames.json", output)
         elif args.command == "review":

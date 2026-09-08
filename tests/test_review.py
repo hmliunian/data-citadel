@@ -4,6 +4,7 @@ from unittest.mock import Mock
 import pytest
 
 from data_citadel.experts import EXPERT_POLICY
+from data_citadel.media.sampling import WRIST_INTERVAL_S
 from data_citadel.models import Assessment, Episode, Evidence, ExpertError, Finding, Frame, MediaError, ProviderError, SampledVideo
 from data_citadel.review.integrity import check_fields, check_integrity
 from data_citadel.review.policy import decide
@@ -19,6 +20,18 @@ def episode(tmp_path):
     sidecar.write_text("{}")
     return Episode("candidate", "A_001", "TASK_1", "拿起杯子", "collector", mcap, sidecar,
                    review_status="Accepted")
+
+
+@pytest.fixture
+def multiview():
+    return SampledVideo([
+        Frame(0.0, b"main-start"), Frame(0.004, b"left-start", "left_wrist"),
+        Frame(0.008, b"right-start", "right_wrist"), Frame(2.0, b"main-end"),
+        Frame(2.004, b"left-end", "left_wrist"), Frame(2.008, b"right-end", "right_wrist"),
+    ], 2.01, "camera", "uniform", motion={"views": {
+        "main": {"topic": "main-source"}, "left_wrist": {"topic": "left-source"},
+        "right_wrist": {"topic": "right-source"},
+    }})
 
 
 def passing(**updates):
@@ -114,7 +127,7 @@ def service(episode, tmp_path, monkeypatch):
         "missing_required_channels": [], "empty_required_channels": [], "message_counts": {"camera": 60},
     })
     return ReviewService(repository, sampler, experts, client, Settings(
-        experts_path=tmp_path / "absent-experts.json", camera_topic="camera",
+        experts_path=tmp_path / "absent-experts.json", camera_topic="camera", camera_mode="main_wrist",
     ))
 
 
@@ -122,10 +135,11 @@ def test_service_keeps_each_expert_instruction_and_local_review_provenance(servi
     result = service.review("candidate", "keyframes")
     assert result.ground_truth_candidate
     calls = service.sampler.sample.call_args_list
-    assert calls[0].kwargs == {"strategy": "keyframes", "interval_s": 2.0}
-    assert all(call.kwargs == {"strategy": "uniform", "interval_s": 1.0} for call in calls[1:])
+    assert calls[0].kwargs == {"strategy": "keyframes", "interval_s": 2.0, "camera_mode": "main_wrist"}
+    assert all(call.kwargs == {"strategy": "uniform", "interval_s": 1.0, "camera_mode": "main_wrist"} for call in calls[1:])
     assert len(result.provenance["expert_ids"]) == 5
     assert result.provenance["candidate_timestamps_s"] == [0.0, 2.0]
+    assert result.provenance["candidate_views"] == {"main": {"topic": "camera", "timestamps_s": [0.0, 2.0]}}
     assert result.provenance["expert_version"] == "test-v1"
     assert result.provenance["expert_config_sha256"] == "a" * 64
     assert result.provenance["expert_matching_policy"] == EXPERT_POLICY
@@ -141,6 +155,29 @@ def test_service_keeps_each_expert_instruction_and_local_review_provenance(servi
     assert [text for text, _ in expert_videos] == [f"拿起物体{i}" for i in range(5)]
     assert "source-reviewer" not in repr(service.client.mock_calls)
     assert "Accepted" not in repr(service.client.mock_calls)
+
+
+def test_camera_mode_override_reaches_candidate_and_all_experts(service):
+    result = service.review("candidate", camera_mode="main")
+    assert result.provenance["camera_mode"] == "main"
+    assert result.provenance["candidate_wrist_interval_s"] == WRIST_INTERVAL_S
+    assert result.provenance["expert_wrist_interval_s"] == WRIST_INTERVAL_S
+    assert len(service.sampler.sample.call_args_list) == 6
+    assert all(call.kwargs["camera_mode"] == "main" for call in service.sampler.sample.call_args_list)
+
+
+def test_multiview_provenance_keeps_each_real_clock_and_source(service, multiview):
+    service.sampler.sample.return_value = multiview
+    result = service.review("candidate")
+    assert result.provenance["camera_mode"] == "main_wrist"
+    assert result.provenance["candidate_timestamps_s"] == [0.0, 0.004, 0.008, 2.0, 2.004, 2.008]
+    assert result.provenance["candidate_views"]["left_wrist"] == {
+        "topic": "left-source", "timestamps_s": [0.004, 2.004],
+    }
+    assert result.provenance["expert_views"]["expert-0"]["right_wrist"] == {
+        "topic": "right-source", "timestamps_s": [0.008, 2.008],
+    }
+    assert result.provenance["expert_timestamps_s"]["expert-0"] == result.provenance["candidate_timestamps_s"]
 
 
 @pytest.mark.parametrize("generic_verdict,expected", [
@@ -163,6 +200,24 @@ def test_no_experts_still_runs_generic_without_leaking_resolution_error(service,
     assert "private-label-or-reviewer" not in result.model_dump_json()
     service.sampler.sample.assert_called_once()
     service.client.assess_generic.assert_called_once()
+    service.client.assess_task.assert_not_called()
+
+
+def test_missing_experts_budget_counts_only_main_generic_frames(service, multiview):
+    service.sampler.sample.return_value = multiview
+    service.experts.resolve.side_effect = ExpertError("no experts")
+    service.settings = replace(service.settings, max_request_images=2)
+    assert service.review("candidate").verdict == "uncertain"
+    service.client.assess_generic.assert_called_once()
+    service.client.assess_task.assert_not_called()
+
+
+def test_multiview_request_budget_fails_before_any_paid_call(service, multiview):
+    service.sampler.sample.return_value = multiview
+    service.settings = replace(service.settings, max_request_images=35)
+    with pytest.raises(ProviderError, match="image_budget_exceeded"):
+        service.review("candidate")
+    service.client.assess_generic.assert_not_called()
     service.client.assess_task.assert_not_called()
 
 

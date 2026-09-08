@@ -17,6 +17,7 @@ def build_sampler(settings: Settings) -> VideoSampler:
     return VideoSampler(
         camera_topic=settings.camera_topic, max_frames=settings.max_frames,
         max_image_size=settings.max_image_size, cache_dir=settings.artifacts_dir / "cache",
+        camera_mode=settings.camera_mode,
     )
 
 

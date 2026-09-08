@@ -18,7 +18,16 @@ const scenario = process.argv[2];
 
 function element(tag) {
   return {
-    tag, value:'', textContent:'', children:[], events:{}, hidden:false,
+    tag, value:'', textContent:'', children:[], events:{}, dataset:{}, hidden:false,
+    readyState:0, currentTime:0, paused:true, loadCalls:0,
+    pause() { this.paused = true; },
+    load() { this.loadCalls++; this.readyState = 0; },
+    removeAttribute(name) { delete this[name]; },
+    querySelectorAll(tag) {
+      return this.children.flatMap(child => [
+        ...(child.tag === tag ? [child] : []), ...(child.querySelectorAll?.(tag) || [])
+      ]);
+    },
     addEventListener(name, callback) { this.events[name] = callback; },
     replaceChildren(...children) {
       this.children = children;
@@ -30,6 +39,8 @@ function element(tag) {
 const nodes = Object.fromEntries([...html.matchAll(/<([a-z]+)[^>]*\bid="([^"]+)"[^>]*>/g)]
   .map(match => [match[2], element(match[1])]));
 nodes.strategy.value = 'uniform';
+nodes.reviewMode.value = 'main';
+assert.match(html, /id="reviewMode"[^>]*>\s*<option value="main"/);
 const first = 'a'.repeat(32), second = 'b'.repeat(32);
 const records = [
   {episode_id:first, action_id:'A_001', task_code:'first-task', instruction:'拿起苹果',
@@ -67,14 +78,33 @@ if(scenario === 'incorrect_labels') {
   result.ground_truth_candidate = false;
   result.reason = '严格审核证据不足，原始 Qwen 分项通过';
 }
-const requests = [];
-let finishReview;
+const requests = [], previewRequests = [];
+let finishReview, finishPreview;
+const previewResult = {
+  duration_s:5, strategy:scenario === 'preview_keyframes' ? 'keyframes' : 'uniform', warnings:[], motion:{},
+  videos:Object.fromEntries(Object.entries({main:0.25, left_wrist:2.25, right_wrist:0.5}).map(([view, start_s]) => [
+    view, {url:'/v1/episodes/' + first + '/video?view=' + view, start_s}
+  ])),
+  frames:[['main', 1.25], ['left_wrist', 3.75], ['left_wrist', 1.0], ['right_wrist', 3.0]]
+    .map(([view, timestamp_s]) => ({view, timestamp_s, image:'data:image/jpeg;base64,' + Buffer.from(view).toString('base64')}))
+};
+if(scenario === 'preview_missing_view') {
+  delete previewResult.videos.right_wrist;
+  previewResult.frames = previewResult.frames.filter(frame => frame.view !== 'right_wrist');
+}
 const response = value => ({ok:true, json:async () => value});
 const context = {
   document:{getElementById:id => nodes[id], createElement:element},
   Option:function(text, value) { this.text = text; this.value = value; },
   fetch:async (path, options) => {
     if(path === '/v1/episodes') return response(records);
+    if(path.includes('/frames?')) {
+      previewRequests.push(path);
+      return new Promise(resolve => {
+        finishPreview = () => resolve(scenario === 'preview_stale_error'
+          ? {ok:false, json:async () => ({detail:'旧预览失败'})} : response(previewResult));
+      });
+    }
     assert.equal(path, '/v1/reviews');
     requests.push(JSON.parse(options.body));
     return new Promise(resolve => { finishReview = () => resolve(response(result)); });
@@ -87,8 +117,109 @@ const context = {
   const sourceText = scenario === 'missing_reference' ? '未提供' : '标注信息错误（annotation_error）';
   assert.ok(nodes.groundTruth.textContent.startsWith('GT（Ground Truth，原人工审核标签）：'));
   assert.ok(nodes.groundTruth.textContent.includes(sourceText));
+  if(scenario.startsWith('preview_')) {
+    nodes.strategy.value = previewResult.strategy;
+    const pending = nodes.preview.events.click();
+    assert.deepEqual(previewRequests, [
+      '/v1/episodes/' + first + '/frames?strategy=' + previewResult.strategy + '&interval_s=2&camera_mode=main_wrist'
+    ]);
+    assert.equal(requests.length, 0);
+    if(scenario === 'preview_stale_response' || scenario === 'preview_stale_error') {
+      nodes.episode.value = second;
+      nodes.episode.events.change();
+      nodes.status.textContent = '已选择新记录';
+      finishPreview(); await pending;
+      assert.equal(nodes.status.textContent, '已选择新记录');
+      assert.equal(nodes.frames.children.length, 0);
+      assert.equal(nodes.previewCard.hidden, true);
+      assert.ok(nodes.groundTruth.textContent.includes('正确（correct）'));
+      assert.equal(nodes.preview.disabled, false);
+      return;
+    }
+    finishPreview(); await pending;
+    assert.equal(nodes.previewCard.hidden, false);
+    assert.equal(nodes.frames.children.length, 3);
+    assert.deepEqual(nodes.frames.children.map(group => group.dataset.view), ['main', 'left_wrist', 'right_wrist']);
+    assert.deepEqual(nodes.frames.children.map(group => group.children[0].textContent), ['主视角', '左腕 Wrist', '右腕 Wrist']);
+    if(previewResult.strategy === 'uniform') {
+      assert.match(nodes.samplingNote.textContent, /均匀抽帧/);
+      assert.doesNotMatch(nodes.samplingNote.textContent, /事件/);
+    }else{
+      assert.match(nodes.samplingNote.textContent, /事件优先.*回退均匀/);
+    }
+    for(const group of nodes.frames.children) {
+      const view = group.dataset.view, source = previewResult.videos[view];
+      const videos = group.querySelectorAll('video');
+      const frames = previewResult.frames.filter(frame => frame.view === view);
+      assert.deepEqual(group.querySelectorAll('img').map(img => img.src), frames.map(frame => frame.image));
+      if(!source) {
+        assert.equal(videos.length, 0);
+        assert.equal(group.querySelectorAll('button').length, 0);
+        assert.ok(group.children.some(child => child.textContent.includes('不可用')));
+        continue;
+      }
+      assert.equal(videos.length, 1);
+      const video = videos[0];
+      assert.equal(video.dataset.view, view);
+      assert.equal(video.src, source.url);
+      assert.equal(video.controls, true);
+      assert.equal(video.preload, 'none');
+      assert.ok(video.title.endsWith('对应视频'));
+      const jump = group.querySelectorAll('button')[0];
+      assert.equal(jump.disabled, false);
+      video.paused = false;
+      jump.events.click();
+      assert.equal(video.currentTime, 0, 'Seek waits for this video metadata');
+      assert.equal(video.paused, true);
+      assert.equal(video.loadCalls, 1);
+      assert.equal(typeof video.onloadedmetadata, 'function');
+      video.readyState = 1;
+      video.onloadedmetadata();
+      assert.equal(video.currentTime, Math.max(0, frames[0].timestamp_s - source.start_s));
+      assert.equal(video.paused, true);
+      assert.equal(video.onloadedmetadata, null);
+    }
+    const left = nodes.frames.children[1], leftVideo = left.querySelectorAll('video')[0];
+    leftVideo.paused = false;
+    left.querySelectorAll('button')[1].events.click();
+    assert.equal(leftVideo.currentTime, 0, 'Before-source timestamps clamp to zero');
+    assert.equal(leftVideo.loadCalls, 1, 'Loaded metadata permits direct seek without reload');
+    assert.equal(leftVideo.paused, true);
+    if(scenario === 'preview_video_error') {
+      const failure = left.children.find(child => child.textContent.includes('载入失败'));
+      assert.ok(failure && failure.hidden);
+      leftVideo.events.error();
+      assert.equal(failure.hidden, false);
+      assert.match(failure.textContent, /左腕 Wrist.*对应视频载入失败/);
+      leftVideo.events.error();
+      assert.equal(left.children.filter(child => !child.hidden && child.textContent.includes('载入失败')).length, 1);
+      for(const group of [nodes.frames.children[0], nodes.frames.children[2]]) {
+        assert.ok(group.children.every(child => child.hidden || !child.textContent.includes('载入失败')));
+      }
+      assert.equal(nodes.status.textContent, '完成');
+    }
+    const oldVideos = nodes.frames.querySelectorAll('video');
+    oldVideos.forEach(video => { video.paused = false; });
+    oldVideos[0].readyState = 0;
+    nodes.frames.children[0].querySelectorAll('button')[0].events.click();
+    assert.equal(typeof oldVideos[0].onloadedmetadata, 'function');
+    nodes.episode.value = second;
+    nodes.episode.events.change();
+    assert.equal(nodes.previewCard.hidden, true);
+    assert.equal(nodes.frames.children.length, 0);
+    for(const video of oldVideos) {
+      assert.equal(video.paused, true);
+      assert.equal(video.src, undefined);
+      assert.equal(video.onloadedmetadata, null);
+      assert.ok(video.loadCalls >= 2);
+    }
+    return;
+  }
+  if(scenario === 'review_multiview') nodes.reviewMode.value = 'main_wrist';
   const pending = nodes.review.events.click();
-  assert.deepEqual(requests, [{episode_id:first, strategy:'uniform'}]);
+  assert.deepEqual(requests, [{
+    episode_id:first, strategy:'uniform', camera_mode:scenario === 'review_multiview' ? 'main_wrist' : 'main'
+  }]);
   if(scenario === 'selection_during_request') {
     nodes.episode.value = second;
     nodes.episode.events.change();
@@ -152,9 +283,11 @@ const context = {
 @pytest.mark.skipif(NODE is None, reason="Node is unavailable; no frontend dependency is installed")
 @pytest.mark.parametrize("scenario", [
     "separate_labels", "missing_reference", "selection_during_request",
-    "incorrect_labels", "strict_uncertain", "repeated_retry",
+    "incorrect_labels", "strict_uncertain", "repeated_retry", "review_multiview",
+    "preview_three_views", "preview_keyframes", "preview_missing_view", "preview_stale_response",
+    "preview_video_error", "preview_stale_error",
 ])
-def test_ground_truth_and_one_prediction_display_actual_labels(scenario):
+def test_frontend_preserves_labels_and_routes_camera_previews(scenario):
     completed = subprocess.run(
         [NODE, "-e", HARNESS, str(PAGE), scenario], capture_output=True, text=True, timeout=10,
     )
