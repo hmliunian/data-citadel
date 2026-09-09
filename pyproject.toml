@@ -17,16 +17,18 @@ dependencies = [
 dev = ["pytest>=8,<10", "ruff>=0.9,<1"]
 
 [project.scripts]
-data-citadel = "data_citadel.cli:main"
+data-citadel = "pilot.__main__:main"
 
 [tool.setuptools.packages.find]
-where = ["src"]
+where = ["."]
+include = ["pilot*"]
+exclude = ["pilot_tests*"]
 
 [tool.setuptools.package-data]
-data_citadel = ["prompts/*.txt", "static/*"]
+pilot = ["viewer.html"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["pilot_tests"]
 
 [tool.ruff]
 target-version = "py311"

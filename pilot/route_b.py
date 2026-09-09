@@ -8,6 +8,7 @@ from .data import digest, read_json, sha256, write_json
 from .model import REVIEW_RULES, TASK_POLICY, frame_parts
 
 CAPTION_VERSION = "expert-sequence-v1"
+CAPTION_MAX_TOKENS = 8192
 CAPTION_RULES = """你正在记录一条专家示范，当前没有待测样本。依据任务指令和所提供的
 按时间排列的三路采样图像，描述可见的物体、颜色、动作阶段及最终状态。一次理解整条序列。
 每个提供的 frame_id 必须恰好有一条简短 visible 观察，不能遗漏或重复；遮挡或看不清要明确说。
@@ -43,6 +44,7 @@ def _signature(client, run_dir: Path, instruction: str, expert: dict, prefix: st
     return {
         "caption_version": CAPTION_VERSION,
         "prompt_sha256": digest([TASK_POLICY, CAPTION_RULES]),
+        "max_tokens": min(CAPTION_MAX_TOKENS, max(3000, 100 * len(frames) + 1000)),
         "model": client.model, "base_url": str(client.base_url),
         "instruction": instruction, "episode_id": expert["episode_id"], "prefix": prefix,
         "media_signature": expert["signature"], "frames": frames,
@@ -117,8 +119,7 @@ def review(client, *, run_dir: Path, instruction: str, experts: list[dict], cand
                     *frame_parts(expert, prefix, run_dir),
                 ]},
             ]
-            reply = client.complete(messages, max_tokens=max(3000, min(12000,
-                                    100 * len(expert["frames"]) + 1000)))
+            reply = client.complete(messages, max_tokens=signature["max_tokens"])
             saved = {"signature": signature, "reply": reply}
             extra_calls.append(reply)
         if saved.get("signature") != signature:

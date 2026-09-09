@@ -9,6 +9,8 @@ def records():
     for i in range(12):
         result.append({"episode_id": f"{i:032x}", "task_code": "DL-TEST",
                        "mcap_sha256": f"hash-{i}", "quality": "high" if i < 3 else "medium",
+                       "gt_status": "Accepted" if i < 10 else "Denied",
+                       "reviewer": "source-reviewer", "review_time": "2026-09-09",
                        "gt": "incorrect" if i >= 10 else "correct"})
     return result
 
@@ -42,3 +44,20 @@ def test_sampling_uses_real_times_and_keeps_endpoints():
 def test_invalid_timestamps_are_rejected():
     with pytest.raises(ValueError):
         sample_indices([0.2, 0.1])
+
+
+def test_high_without_review_is_reserved_but_not_selected():
+    rows = records()
+    rows[0]["reviewer"] = None
+    result = choose_samples(rows, 2, "fixed")
+    assert rows[0]["episode_id"] in result["expert_pool"]
+    assert rows[0]["episode_id"] not in result["experts"]
+    with pytest.raises(ValueError, match="original review records"):
+        choose_samples(rows, 3, "fixed")
+
+
+def test_cross_task_experts_are_rejected():
+    rows = records()
+    rows[0]["task_code"] = "DL-OTHER"
+    with pytest.raises(ValueError, match="task codes"):
+        choose_samples(rows, 2, "fixed")

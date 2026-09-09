@@ -71,6 +71,8 @@ def source_records(dataset: Path, task_code: str) -> tuple[dict, list[dict]]:
             "gt": {"Accepted": "correct", "Denied": "incorrect"}.get(tags.get("task.review.status")),
             "gt_status": tags.get("task.review.status"),
             "gt_reason": tags.get("task.review.deny_reason"),
+            "reviewer": tags.get("task.review.reviewer"),
+            "review_time": tags.get("task.review.review_time"),
         })
     return task, records
 
@@ -78,10 +80,14 @@ def source_records(dataset: Path, task_code: str) -> tuple[dict, list[dict]]:
 def choose_samples(records: list[dict], expert_count: int, seed: str) -> dict:
     if expert_count < 1:
         raise ValueError("At least one expert is needed")
+    if len({r["task_code"] for r in records}) != 1:
+        raise ValueError("Experts cannot be shared across task codes")
     ordered = sorted(records, key=lambda r: digest([seed, r["episode_id"]]))
     pool = [r for r in ordered if r["quality"] == "high"]
-    if len(pool) < expert_count:
-        raise ValueError("Not enough high expert candidates")
+    eligible = [r for r in pool if r.get("gt_status") == "Accepted"
+                and r.get("reviewer") and r.get("review_time")]
+    if len(eligible) < expert_count:
+        raise ValueError("Not enough high experts with Accepted status and original review records")
     expert_hashes = {r["mcap_sha256"] for r in pool}
     seen, accepted, denied, duplicates = set(expert_hashes), [], [], []
     for row in ordered:
@@ -97,7 +103,7 @@ def choose_samples(records: list[dict], expert_count: int, seed: str) -> dict:
             denied.append(row)
     if len(accepted) < 6 or len(denied) < 2:
         raise ValueError("This pilot needs six non-expert positives and two negatives")
-    experts = pool[:expert_count]
+    experts = eligible[:expert_count]
     if len({r["mcap_sha256"] for r in experts}) != len(experts):
         raise ValueError("Duplicate expert recordings")
     return {

@@ -78,13 +78,14 @@ class ModelCallError(RuntimeError):
 
 class QwenClient:
     def __init__(self, run_dir: Path, *, model: str | None = None, base_url: str | None = None,
-                 transport=None, api_key: str | None = None):
+                 transport=None, api_key: str | None = None, context: dict | None = None):
         self.model = model or os.getenv("QWEN_MODEL", "qwen-vl-max")
         self.base_url = (base_url or os.getenv("QWEN_BASE_URL",
                          "https://dashscope.aliyuncs.com/compatible-mode/v1")).rstrip("/")
         self.run_dir = run_dir
         self.transport = transport
         self.api_key = api_key
+        self.context = context or {}
 
     def complete(self, messages: list[dict], *, max_tokens: int = 3000) -> dict:
         key = self.api_key or os.getenv("QWEN_API_KEY") or os.getenv("DASHSCOPE_API_KEY")
@@ -106,6 +107,7 @@ class QwenClient:
                 call_dir = self.run_dir / "calls" / uuid.uuid4().hex
                 write_json(call_dir / "request.json", {
                     "model": self.model, "base_url": self.base_url, "attempt": attempt + 1,
+                    "context": self.context,
                     "request_sha256": request_hash, "input_images": images,
                     "messages": safe_messages(messages), "temperature": 0, "max_tokens": max_tokens,
                 })

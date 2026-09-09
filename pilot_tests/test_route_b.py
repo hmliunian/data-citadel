@@ -21,9 +21,11 @@ class FakeClient:
     def __init__(self, responses):
         self.responses = list(responses)
         self.calls = []
+        self.budgets = []
 
     def complete(self, messages, max_tokens=3000):
         self.calls.append(copy.deepcopy(messages))
+        self.budgets.append(max_tokens)
         return {"data": self.responses.pop(0), "usage": {"total_tokens": 11},
                 "model": self.model, "request_id": f"fake-{len(self.calls)}", "elapsed_s": 0.1,
                 "input_images": sum(p["type"] == "image_url" for m in messages
@@ -31,11 +33,12 @@ class FakeClient:
                 "request_sha256": digest(messages), "raw": {"fake": True}}
 
 
-def media(tmp_path, episode_id, color="brown"):
+def media(tmp_path, episode_id, color="brown", frame_count=2):
     frames = []
     folder = tmp_path / "media" / episode_id
     folder.mkdir(parents=True)
-    for index, time_s in enumerate((0.2, 2.03)):
+    for index in range(frame_count):
+        time_s = 0.2 if index == 0 else 2 * index + 0.03
         path = folder / f"main-{index:05d}.jpg"
         Image.new("RGB", (8, 8), color=color).save(path)
         frames.append({
@@ -103,7 +106,7 @@ def test_reuses_immutable_captions_and_only_sends_candidate_images(tmp_path):
 
 
 @pytest.mark.parametrize("change", ["model", "base_url", "prompt", "schema", "instruction",
-                                    "sampling", "image", "time"])
+                                    "sampling", "image", "time", "budget"])
 def test_cache_invalidates_changed_inputs(tmp_path, monkeypatch, change):
     expert, candidate = media(tmp_path, "expert"), media(tmp_path, "candidate", "green")
     client = FakeClient([caption(expert), REVIEW])
@@ -128,6 +131,8 @@ def test_cache_invalidates_changed_inputs(tmp_path, monkeypatch, change):
         expert["frames"][0]["sha256"] = sha256(path)
     elif change == "time":
         expert["frames"][0]["time_s"] = 0.25
+    elif change == "budget":
+        monkeypatch.setattr(route_b, "CAPTION_MAX_TOKENS", 2500)
     client.responses.extend([caption(expert), REVIEW])
     second = route_b.review(client, run_dir=tmp_path, instruction=instruction,
                             experts=[expert], candidate=candidate)
@@ -136,6 +141,20 @@ def test_cache_invalidates_changed_inputs(tmp_path, monkeypatch, change):
     assert old["cache_key"] != new["cache_key"]
     assert (tmp_path / old["cache_path"]).exists()
     assert (tmp_path / new["cache_path"]).exists()
+    if change == "budget":
+        assert client.budgets == [3000, 3000, 2500, 3000]
+
+
+@pytest.mark.parametrize("frame_count,budget", [(71, 8100), (72, 8192), (110, 8192)])
+def test_caption_budget_respects_model_limit_and_matches_cache(tmp_path, frame_count, budget):
+    expert = media(tmp_path, "expert", frame_count=frame_count)
+    candidate = media(tmp_path, "candidate", "green")
+    client = FakeClient([caption(expert), REVIEW])
+    result = route_b.review(client, run_dir=tmp_path, instruction=INSTRUCTION,
+                            experts=[expert], candidate=candidate)
+    assert client.budgets == [budget, 3000]
+    cached = read_json(tmp_path / result["reference"]["experts"][0]["cache_path"])
+    assert cached["signature"]["max_tokens"] == budget
 
 
 @pytest.mark.parametrize("corruption", ["unknown_frame", "missing_frame", "duplicate_frame",
