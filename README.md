@@ -1,6 +1,6 @@
 # Data Citadel
 
-机器人采集审核的最小 A/B 对照试验。目前只验证任务 `DL-8GY1IC`，尚不能据此宣称全量清洗有效。需求与阶段记录见 [agent.md](agent.md)，开发约定见 [AGENTS.md](AGENTS.md)。
+机器人采集审核的最小 A/B 对照试验。目前只验证任务 `DL-8GY1IC`，尚不能据此宣称全量清洗有效。需求与阶段记录见 [agent.md](agent.md)，开发约定见 [AGENTS.md](AGENTS.md)，真实结果见 [试验报告](pilot_reports/20260909_dl8gy1ic.md)。
 
 - A：同任务专家图像 + 待测图像，一次审核。
 - B：先缓存每位专家的逐帧描述，再结合待测图像审核。
@@ -53,4 +53,4 @@ cd /home/xuran/projects/data_review/data_citadel
 PILOT_RUN_DIR=artifacts/pilot_20260909_dl8gy1ic .venv/bin/python -m pytest -q pilot_tests/test_real_media.py
 ```
 
-普通测试使用假客户端；最后一项核对三条真实专家 MP4 的帧数和定位时间，不调用模型。浏览器实际播放还需在本机查看。工程测试通过不等于模型效果达标；独立报告必须同时看误放行、误拒、自动覆盖率及分母。
+普通测试使用假客户端；最后一项核对三条真实专家 MP4 的帧数/定位、已归档模型消息的 GT 隔离及真实结果 API/视频 Range，不调用模型。浏览器可在本机复查，本轮 Firefox 检查记录见报告。工程测试通过不等于模型效果达标；独立报告必须同时看误放行、误拒、自动覆盖率及分母。
