@@ -5,7 +5,8 @@ from pathlib import Path
 
 from .data import DEFAULT_DATASET, load_manifest, prepare
 from .media import prepare_media
-from .runner import freeze, report, run_split
+from .model import QwenClient
+from .runner import check_freeze, freeze, report, run_split
 
 
 def main():
@@ -17,7 +18,7 @@ def main():
     preparation.add_argument("--task-code", default="DL-8GY1IC")
     preparation.add_argument("--experts", type=int, default=3)
     sample = commands.add_parser("sample")
-    sample.add_argument("--split", choices=("experts", "development"), default="development")
+    sample.add_argument("--split", choices=("experts", "development", "holdout"), default="development")
     run = commands.add_parser("run")
     run.add_argument("--split", choices=("development", "holdout"), required=True)
     run.add_argument("--route", choices=("A", "B"), required=True)
@@ -32,6 +33,8 @@ def main():
         manifest = prepare(args.dataset, args.run_dir, args.task_code, args.experts)
         print(json.dumps({"task_code": manifest["task_code"], "splits": manifest["splits"]}, indent=2))
     elif args.command == "sample":
+        if args.split == "holdout":
+            check_freeze(args.run_dir, QwenClient(args.run_dir))
         manifest = load_manifest(args.run_dir)
         for episode_id in manifest["splits"][args.split]:
             media = prepare_media(args.run_dir, manifest["episodes"][episode_id], manifest["sampling"])

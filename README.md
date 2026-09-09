@@ -1,147 +1,56 @@
-<p align="center"><img src="./data_citadel.png" alt="Data Citadel" width="100%"></p>
-
 # Data Citadel
 
-面向机器人原子操作的严格视频审核服务。输入一次采集的 `episode_id`，读取本地 JSON/MCAP，以五条人工确认的专家视频作为参考，返回 `correct`、`incorrect` 或 `uncertain`，以及错误类型和时间证据。
+机器人采集审核的最小 A/B 对照试验。目前只验证任务 `DL-8GY1IC`，尚不能据此宣称全量清洗有效。需求与阶段记录见 [agent.md](agent.md)，开发约定见 [AGENTS.md](AGENTS.md)。
 
-当前支持全部十个动作：`A_001 A_002 A_003 A_004 A_005 A_009 A_011 A_012 A_013 A_015`。本阶段实现原子操作；长程任务尚未实现。具体需求见 [agent.md](agent.md)，开发约束见 [AGENTS.md](AGENTS.md)，验证记录见 [里程碑](docs/MILESTONES.md)。
+- A：同任务专家图像 + 待测图像，一次审核。
+- B：先缓存每位专家的逐帧描述，再结合待测图像审核。
+- 专家限定同一 `task_code`、high、Accepted，并有原审核记录；数量由 `--experts` 配置，不固定为三条或五条。
+- 三路相机每 2 秒采样并补首尾，保留实际时间。唯一标签为 `correct` / `incorrect`；证据不足为 `needs_review`、标签为空；运行失败单列。
+- 原数据只读；GT 只用于本地展示和评测，不进入模型。
 
-## 启动
-
-使用本项目独立的 Python 3.12 / uv 环境：
-
-```bash
-cd /home/xuran/xuran_projects/data_review/data_citadel
-uv sync
-uv run data-citadel inventory
-uv run data-citadel serve
-```
-
-浏览器打开 `http://127.0.0.1:8000`，可选择动作和采集记录、预览画面并发起审核。交互式 API 文档位于 `/docs`。页面仅适合本地或受控内网；当前没有用户登录机制。
-
-默认数据目录是项目旁的 `../datasets`，按以下结构索引：
-
-```text
-datasets/atomic/<action_id>/<category>/<episode_id>/
-├── <episode_id>.json
-├── episode.mcap
-└── verification.json
-```
-
-原始数据只读。只纳入有校验收据的完整采集组；检查文件大小、修改时间、JSON 哈希及收据配对，解码时检查 MCAP chunk CRC。无收据的下载中目录不进入索引；损坏的已验证组会报错。每次进程启动建立一个本地数据快照，新增下载完成后重启服务更新索引。
-
-## 专家与测试集
-
-按原子动作生成专家和独立测试清单：
+## 查看本轮结果
 
 ```bash
-uv run data-citadel prepare --output-dir config
+cd /home/xuran/projects/data_review/data_citadel
+.venv/bin/python -m pilot --run-dir artifacts/pilot_20260909_dl8gy1ic serve --port 8765
 ```
 
-生成 `config/experts.json`、`config/evaluation.json`、`config/report.json`。再次生成时需使用新的输出目录，避免覆盖审批和旧实验。
+打开 http://127.0.0.1:8765 。页面按 GT / Predict 排列，可切换 ID 和 A/B，展开专家，点击三路关键帧定位各自视频。
 
-`action_id` 是唯一的原子任务划分依据，例如搬运篮子和搬运小熊都属于 A_003。`task_code` 是数据源指令编号，`episode_id` 是一次采集；物体、指令编号和采集员不同不会拆成不同任务。每个动作内按 episode_id 稳定排序，前五条已有人工正确记录用于专家参考，随后五条作为独立正确测试。错误样本也按动作每类取五条；余量列入 `exploratory`，缺额写入报告，不能把样本不足当成分类效果已通过。
+本轮网页/API **只读已有结果，不发起付费审核**：`GET /health`、`GET /api/results`、`GET /api/episodes/{episode_id}`、`GET /media/{episode_id}/{asset_name}`。不提供任意本地文件或源 MCAP 下载；独立集在冻结且已有对应审核结果之前不可浏览。服务仅绑定本机，不宜直接公开。
 
-按用户确认，专家沿用数据源已有人工审核：样本必须位于 `correct`、状态为 `Accepted`，且有 `task.review.reviewer` 原审核人记录。生成器将来源记为 `approval_source: dataset_review`，满五条后启用；运行时再次核对源记录，不伪造二次审批。原审核人和审核时间保留在结果溯源中，不进入模型输入。设 `approved: false` 可禁用某组；手工登记仍支持 `approval_source: manual` 和真实 `reviewer`。专家帧可用网页预览或命令导出：
+## 复现一个新试验
+
+数据格式为 `task-summary.json`、`tasks/<task_code>/api_tags/`、`tasks/<task_code>/data/<id>/episode.mcap` 和 `receipts/`。默认源目录为 `/home/xuran/xuran_projects/data_review/datasets/20260907_afternoon`。
+
+使用新的输出目录，不能覆盖已有清单或冻结结果。以下 `run` 命令会实际调用模型；其余命令不调用模型。
 
 ```bash
-uv run data-citadel sample <episode_id> --interval 1 --output-dir artifacts/expert-preview-1
+.venv/bin/python -m pilot --run-dir artifacts/new_pilot prepare --task-code DL-8GY1IC --experts 3
+.venv/bin/python -m pilot --run-dir artifacts/new_pilot sample --split experts
+.venv/bin/python -m pilot --run-dir artifacts/new_pilot sample --split development
+.venv/bin/python -m pilot --run-dir artifacts/new_pilot run --split development --route A
+.venv/bin/python -m pilot --run-dir artifacts/new_pilot run --split development --route B
+# 查看开发结果后冻结；冻结以后不得再调参并复用该独立集。
+.venv/bin/python -m pilot --run-dir artifacts/new_pilot freeze
+.venv/bin/python -m pilot --run-dir artifacts/new_pilot sample --split holdout
+.venv/bin/python -m pilot --run-dir artifacts/new_pilot run --split holdout --route A
+.venv/bin/python -m pilot --run-dir artifacts/new_pilot run --split holdout --route B
+.venv/bin/python -m pilot --run-dir artifacts/new_pilot report
 ```
 
-专家配置要求恰好五条独立正确样本；待测记录不能同时是自己的专家。当前策略是 `same_action_v2`；旧 `same_task_same_collector_v1` 清单需要重新 `prepare` 到新目录后切换，不能直接沿用旧拆分。配置变更后重启服务。缺少可用专家时任务分项为 `uncertain`，通用审核仍执行，已有明确通用错误仍可输出 `incorrect`。
+当前选择器为这个小样本试验准备：开发和独立集各 3 正 + 1 负，并排除整个 high 候选池及重复 MCAP。样本不足会明确报错，不是通用全量划分器。先统一抽帧再并行 A/B；B 同一路线顺序执行，避免并发重复生成专家描述。
 
-## 模型配置
+凭据顺序：`QWEN_API_KEY` / `DASHSCOPE_API_KEY` → `QWEN_API_KEY_FILE` → 项目 `Qwen-api/qwen_api_key.txt`（只含 key）。可设 `QWEN_MODEL`、`QWEN_BASE_URL`；默认 `qwen-vl-max`、北京 DashScope 兼容端点。凭据及大体积产物不进入 Git。
 
-默认使用视觉模型 `qwen-vl-max`，而非纯文本 `qwen-max`。凭据优先级：
+每次 HTTP 请求/响应和重试单独归档，图像请求日志保存哈希而不是 base64。结果保存在 `results/`；`report` 生成新的 CSV、JSONL 和汇总，统计所有归档调用的用量。估价不是实际账单，详见汇总中的定价来源。失败后显式加 `--retry-failed` 才会重试已失败样本。
 
-1. 环境变量 `QWEN_API_KEY` 或 `DASHSCOPE_API_KEY`。
-2. `QWEN_API_KEY_FILE` 指定的文件。
-3. 项目内 `Qwen-api/qwen_api_key.txt`；兼容原文档的 `../dataset_checker/Qwen-api/qwen_api_key.txt`。
-
-凭据文件只应包含 key 本身。代码仅在发起请求时读取凭据，日志与提交不包含 key。可通过 `QWEN_MODEL`、`QWEN_BASE_URL` 调整模型和地域端点；key 必须与地域匹配。其他配置为 `DATASET_ROOT`、`CITADEL_ARTIFACTS_DIR`、`CITADEL_EXPERTS_PATH`、`CITADEL_CAMERA_TOPIC`，实现见 `settings.py`。
-
-每条完整审核包含通用、任务两次模型请求。通用审核只看主视角并只判断画面质量（`blurred` / `other`），不能以物体或任务不匹配代替质量问题；越界模型输出会报运行错误，不会自动变成负标签。任务请求按顺序提供五条专家的各自指令和视频帧，再提供待测指令和帧；Qwen 从专家学习同类动作的过程，再按待测自己的物体和目标状态判断，不要求物体外观相同。这是同一次请求中的示例指导，不是额外的独立专家学习 API 阶段。HTTP 408/429/5xx 和网络异常有有限重试，请求最多 250 张图。超过图像预算会明确报错。
-
-## 审核与抽帧
-
-```text
-episode_id → JSON/MCAP 完整性检查 → 主视角 / 可选腕部解码与抽帧
-                                      ├→ 主视角通用质量审核
-                                      └→ 同 action_id 的五条专家 → 任务审核
-                                                缺专家时：任务 uncertain
-                                                     ↓
-                                         严格规则合并 → 结果与证据
-```
-
-MCAP 中的 FlatBuffers schema 用于解析 `foxglove.CompressedVideo` 和 `foxglove.JointStates`。视频连续解码后按实际采集时间选择图像。
-
-| 方案 | 行为 |
-| --- | --- |
-| `uniform` | 待测主视角每 2 秒、专家主视角每 1 秒，补首尾；补充腕部画面每 2 秒抽帧 |
-| `keyframes` | 提取左右夹爪位置变化的开合起止时刻，补首尾并去重 |
-| 连续运动摘要 | 所有解码帧参与低分辨率差分，提供超过 5 秒的低运动候选区间 |
-
-`camera_mode: main_wrist` 读取 MCAP 的主视角 `/camera/coracam_head/left_h264/video`，以及 `/camera/coracam_lefthand/left_h264/video`、`/camera/coracam_righthand/left_h264/video` 两路腕部画面。默认保留 `main` 单主视角；多视角尚未证明最终标签匹配有提升，作为显式可选模式参与成对对照。每路保留原始时间戳与 `main` / `left_wrist` / `right_wrist` 来源，不伪造完全同步的画面。腕部用于看清物体身份和接触细节，不替代主视角的全过程与最终位置证据；判 `correct` 仍需要两个不同主视角时刻。夹爪事件是采样启发式，阈值说明在 `media/sampling.py`；低运动不等于动作错误。夹爪数据不可用、帧预算缩减、任一路缺失或覆盖缺口等情况会输出 warning，并阻止数据进入 ground truth 候选。主视角与腕部复用同一单路采样器和缓存；总请求仍受 250 张图预算约束，不会静默丢帧或放宽放行门槛。
-
-只有完整性、通用质量和任务完成检查都明确通过、有实际候选时间证据、没有采样警告且达到配置阈值时，才输出 `correct`。模型自报的置信度不代表经过统计校准，也不能保证零误判。
-
-错误代码包括 `data_missing`、`blurred`、`content_mismatch`、`incomplete_action`、`repeated_retry`、`annotation_error`、`other`。遮挡或无意义静止用 `other` 并附具体原因；不确定的错误类别不强行归类。重试样本单独记录 `retry_outcome`，确认最终成功且有过程证据时标记 `retain_retry_sample`。此标记不使其成为普通 ground truth。
-
-人工审核状态、拒绝原因、目录类别和采集员信息不进入模型提示词。Qwen 失败、无法解码或不支持的 schema 为运行错误，不伪装为语义上的 `incorrect`。
-
-## API 与命令行
+## 验证
 
 ```bash
-curl -X POST http://127.0.0.1:8000/v1/reviews \
-  -H 'Content-Type: application/json' \
-  -d '{"episode_id":"<32位episode_id>","strategy":"uniform","camera_mode":"main_wrist"}'
-
-uv run data-citadel --camera-mode main_wrist review <episode_id> --strategy keyframes
+.venv/bin/python -m pytest -q
+.venv/bin/python -m ruff check pilot pilot_tests
+PILOT_RUN_DIR=artifacts/pilot_20260909_dl8gy1ic .venv/bin/python -m pytest -q pilot_tests/test_real_media.py
 ```
 
-响应包含 `verdict`、`error_types`、`findings`、`ground_truth_candidate`、`retain_retry_sample`、分项判断和 `provenance`。模型、提示词、决策规则、专家配置的版本/哈希和实际抽帧时间被保留；审核结果保存到 `artifacts/reviews/`。
-
-网页结果按 **GT 在上、Predict 在下** 展示：GT 是原人工审核标签；Predict 只显示一个最终标签（中文与代码），不并列多个预测。存在多个已确认错误时，采用 `error_types` 中第一项；完整错误和 Qwen 原始分项保留在展开详情，不改变严格审核结果。可另行展开五条专家的指令、输入帧数和任务判断。
-
-预览区将主视角、左腕 Wrist、右腕 Wrist 分组，每组有对应视频与所选策略的关键帧。点击帧会按该路起始时间换算后定位播放器；切换记录会暂停并清理旧视频。视频按需从 MCAP 导出为 H.264 MP4，支持 Range 拖动播放并复用缓存，原始数据保持只读。页面预览全部三路，与审核选择的 main/main_wrist 模式相互独立；GT/Predict 仍只表示审核结果。
-
-GT 没有来源标签时显示“未提供”；模型的 `ground_truth_candidate` 只是严格策略筛选的候选，不替代原人工标签。GT 仅用于页面对照，不进入模型请求。
-
-无需打开网页即可进行算法迭代。审核与抽帧接口都接受 `camera_mode: main | main_wrist`；默认可通过 `CITADEL_CAMERA_MODE` 配置。`provenance.candidate_views`、`expert_views` 和每条 `evidence.view` 保留模型实际使用的视角及时间，原人工 GT 仍只在本地用于对照。
-
-其他接口：`GET /health`、`GET /v1/inventory`、`GET /v1/episodes`、`GET /v1/episodes/{id}/frames`、`GET /v1/episodes/{id}/video?view=main|left_wrist|right_wrist`。HTTP 404 表示记录不存在，422 表示请求或数据问题，502 表示模型调用失败。
-
-## 评测与验证
-
-```bash
-uv run data-citadel evaluate config/evaluation.json \
-  --output-dir artifacts/evaluation-uniform --strategy uniform
-uv run data-citadel evaluate config/evaluation.json \
-  --output-dir artifacts/evaluation-keyframes --strategy keyframes
-
-uv run pytest -q
-CITADEL_REAL_MCAP=1 uv run pytest -q
-uv run ruff check src tests scripts
-```
-
-评测输出 `predictions.jsonl` 和 `summary.json`，按动作及 baseline/exploratory 分组，报告正确精确率/召回率、错误误放行率、不确定比例、覆盖率、各类支持数及多标签混淆矩阵。没有预测正确样本时精确率为 `null`；服务异常单列并计入覆盖率分母。支持 `--limit N` 做小批量验证。真实 MCAP 测试无外部模型请求；普通测试使用合成数据与注入的模型客户端。
-
-模型评测与工程测试不同：测试通过说明实现满足已覆盖的行为约束；分类效果需要有人工审核依据的专家集及独立人工测试集验证。
-
-## 接口成对诊断
-
-启动一个实验用 FastAPI 服务，再对显式选择的、非专家本身的样本进行两种视角对照：
-
-```bash
-uv run data-citadel serve --port 8001
-uv run python scripts/compare_views.py \
-  --base-url http://127.0.0.1:8001 \
-  --output-dir artifacts/paired-wrist-run-1 \
-  --episode-ids <episode_id_1> <episode_id_2>
-```
-
-脚本只向 `/v1/reviews` 发送 ID、抽帧策略和视角模式，GT 不进入请求。每次保存原始响应、耗时、操作错误，只有模型、提示词、专家集和采样参数一致的结果才成对比较；单标签规则与页面一致。输出目录必须是新目录，避免覆盖实验。结果是已选诊断集上的对照，不是独立测试准确率；调参后仍应另用未查看样本验证。
-
-## 代码分层
-
-`models/settings` 定义共享数据与配置；`repository/media` 负责读取和采样；`experts` 管理专家；`qwen/review` 完成模型调用与判定；`api/cli/runtime` 共享应用入口；`evaluation` 独立处理人工标签与指标。新增代码遵循 [concise-code skill](.agents/skills/concise-code/SKILL.md)。
+普通测试使用假客户端；最后一项核对三条真实专家 MP4 的帧数和定位时间，不调用模型。浏览器实际播放还需在本机查看。工程测试通过不等于模型效果达标；独立报告必须同时看误放行、误拒、自动覆盖率及分母。
