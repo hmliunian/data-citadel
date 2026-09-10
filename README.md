@@ -45,6 +45,19 @@ cd /home/xuran/projects/data_review/data_citadel
 
 每次 HTTP 请求/响应和重试单独归档，图像请求日志保存哈希而不是 base64。结果保存在 `results/`；`report` 生成新的 CSV、JSONL 和汇总，统计所有归档调用的用量。估价不是实际账单，详见汇总中的定价来源。失败后显式加 `--retry-failed` 才会重试已失败样本。
 
+## 全量现状回放
+
+沿用当前 A/B 判法，排除整个 high 专家池，固定全量清单；这是与原 GT 的对照，不是新的独立验证。仅 `run` 付费调用，续跑默认跳过已有结果。
+
+```bash
+.venv/bin/python -m pilot.full --run-dir artifacts/new_full prepare --experts 3
+.venv/bin/python -m pilot.full --run-dir artifacts/new_full run --first-per-task
+.venv/bin/python -m pilot.full --run-dir artifacts/new_full run
+.venv/bin/python -m pilot.full --run-dir artifacts/new_full report
+```
+
+报告含整体及各任务的正确率、误放行/误拒、覆盖率、待复核/失败和调用费用；使用 CSV/JSONL 查看，现有单任务网页不读取全量清单。
+
 ## 验证
 
 ```bash
