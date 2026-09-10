@@ -57,6 +57,7 @@ def test_full_denominators_and_unknown_gt_are_distinct_from_prediction_accuracy(
     assert summary["partial"] and a["partial"]
     assert summary["routes"]["B"]["overall"]["pending"] == 6
     assert summary["routes"]["B"]["tasks"]["DL-T2"]["pending"] == 2
+    assert summary["first_results"]["A"] == {key: value for key, value in a.items() if key != "billing"}
     exported = [json.loads(line) for line in (folder / "predictions.jsonl").read_text().splitlines()]
     assert len(exported) == 12 and sum(row["status"] == "pending" for row in exported) == 7
     assert next(row for row in exported if row["episode_id"] == P1 and row["route"] == "A")["gt"] == "correct"
@@ -99,6 +100,34 @@ def test_latest_result_per_route_and_exclusions_never_expand_population(run_dir)
     before = (folder / "summary.json").read_bytes()
     second, _ = report(run_dir)
     assert second != folder and (folder / "summary.json").read_bytes() == before
+
+
+@pytest.mark.parametrize("route", ["A", "B"])
+def test_first_persisted_failure_and_false_accept_survive_successful_retries(run_dir, route):
+    result(run_dir, P1, route=route, status="failed", label=None)
+    result(run_dir, P1, route=route, tick=2)
+    result(run_dir, N1, route=route)
+    result(run_dir, N1, route=route, tick=2, label="incorrect")
+    result(run_dir, P2, route=route, status="needs_review", label=None)
+    result(run_dir, UNKNOWN, route=route)
+    result(run_dir, E1, route=route)
+    result(run_dir, DUPLICATE, route=route)
+    _, summary = report(run_dir)
+    first, latest = summary["first_results"][route], summary["routes"][route]["overall"]
+    assert [first[key] for key in ("total", "attempted", "pending", "completed", "needs_review", "failed")] == [6, 4, 2, 2, 1, 1]
+    assert [first[key] for key in ("gt_correct", "gt_incorrect", "gt_valid", "gt_unknown")] == [3, 2, 5, 1]
+    assert first["gt_agreement"] == {"count": 0, "total": 5, "rate": 0}
+    assert first["prediction_accuracy"] == {"count": 0, "total": 1, "rate": 0}
+    assert first["false_accept"] == {"count": 1, "total": 2, "rate": 0.5}
+    assert first["coverage"]["rate"] == 2 / 6
+    assert first["processing_success"]["rate"] == 3 / 4
+    assert latest["failed"] == 0 and latest["completed"] == 3
+    assert latest["gt_agreement"] == {"count": 2, "total": 5, "rate": 0.4}
+    assert latest["prediction_accuracy"]["rate"] == 1
+    assert latest["false_accept"]["count"] == 0
+    other = summary["first_results"]["B" if route == "A" else "A"]
+    assert other["pending"] == 6 and other["partial"]
+    assert other["prediction_accuracy"]["rate"] is None
 
 
 def call(run_dir, name, *, route="A", purpose="review", tokens=100, status=200, error=False):

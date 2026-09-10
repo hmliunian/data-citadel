@@ -133,7 +133,7 @@ def report(run_dir: Path) -> tuple[Path, dict]:
     if not routes or len(set(routes)) != len(routes) or set(routes) - {"A", "B"}:
         raise ValueError("Expected unique A/B routes")
     results, unreadable = archived_results(run_dir)
-    latest, ignored = {}, []
+    first, latest, ignored = {}, {}, []
     for row in results:
         key = row.get("route"), row.get("episode_id")
         if key[0] not in routes or candidates.get(key[1]) != row.get("task_code"):
@@ -142,18 +142,20 @@ def report(run_dir: Path) -> tuple[Path, dict]:
         if (row.get("status") not in ("completed", "needs_review", "failed")
                 or (row["status"] == "completed") != (row.get("label") in LABELS)):
             raise ValueError("Result status and prediction label disagree")
+        first.setdefault(key, row)
         latest[key] = row
-    rows = []
+    rows, first_rows = [], []
     for route in routes:
         for episode_id, task_code in candidates.items():
             metadata = episodes[episode_id]
-            row = {"status": "pending", "label": None, "reason": "尚未生成审核结果。",
-                   **latest.get((route, episode_id), {})}
             gt = metadata.get("gt")
-            row.update(episode_id=episode_id, task_code=task_code, route=route,
-                       gt=gt if gt in LABELS else {"Accepted": "correct", "Denied": "incorrect"}.get(metadata.get("gt_status")),
-                       gt_status=metadata.get("gt_status"), gt_reason=metadata.get("gt_reason"))
-            rows.append(row)
+            for selection, output in ((latest, rows), (first, first_rows)):
+                row = {"status": "pending", "label": None, "reason": "尚未生成审核结果。",
+                       **selection.get((route, episode_id), {})}
+                row.update(episode_id=episode_id, task_code=task_code, route=route,
+                           gt=gt if gt in LABELS else {"Accepted": "correct", "Denied": "incorrect"}.get(metadata.get("gt_status")),
+                           gt_status=metadata.get("gt_status"), gt_reason=metadata.get("gt_reason"))
+                output.append(row)
     calls = archived_calls(run_dir, results)
 
     def group(route, task_code=None):
@@ -170,6 +172,8 @@ def report(run_dir: Path) -> tuple[Path, dict]:
         "candidate_episodes": len(candidates), "expected_predictions": len(rows), "task_count": len(tasks),
         "routes": {route: {"overall": group(route),
                            "tasks": {task_code: group(route, task_code) for task_code in tasks}} for route in routes},
+        "first_results": {route: metrics([row for row in first_rows if row["route"] == route])
+                          for route in routes},
         "exclusions": {"entries": len(exclusions), "episode_count": len(excluded_ids),
                        "expert_pool_episodes": len(pool),
                        "selected_experts": sum(len(task["experts"]) for task in tasks.values()),
@@ -180,6 +184,7 @@ def report(run_dir: Path) -> tuple[Path, dict]:
         "billing": billing(calls), "calls": calls,
         "unassigned_call_paths": [call["call_path"] for call in calls if call["route"] not in routes],
         "definitions": {
+            "first_results": "Earliest persisted result per route/episode, ordered by created_at then result_path; not the first HTTP attempt. Missing results remain pending. routes retains latest-result metrics; billing includes all attempts.",
             "gt_agreement": "Matching labels / all candidates with valid GT; pending, review, and failure do not match.",
             "prediction_accuracy": "Matching labels / candidates with both a prediction and valid GT.",
             "positive_pass_rate": "GT-correct candidates predicted correct / all GT-correct candidates.",
