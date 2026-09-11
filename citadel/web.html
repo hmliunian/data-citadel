@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>UMI-T · 原子任务测试</title>
+<style>
+:root{color-scheme:dark;font:16px system-ui;background:#10151c;color:#e7edf4}
+body{max-width:1240px;margin:32px auto;padding:0 24px}h1{font-size:24px}h2{font-size:18px}
+header,.toolbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap}header{justify-content:space-between}
+.muted{color:#a3afc0;font-size:14px}button,select{font:inherit;border:1px solid #384453;border-radius:8px;padding:10px;background:#1c2632;color:inherit}
+button{cursor:pointer}button.primary{background:#2b5cd8}button:disabled{opacity:.5;cursor:wait}select{min-width:260px}
+section{margin-top:22px;background:#18212b;padding:20px;border-radius:12px}
+video{width:100%;background:#090d12;border-radius:8px;max-height:420px}.cameras{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+.cameras video{max-height:230px}table{width:100%;border-collapse:collapse}td,th{text-align:left;padding:10px;border-bottom:1px solid #303c49}
+.pass{color:#7de1aa}.fail{color:#ff9292}.unknown{color:#f0ce7b}.evidence{display:flex;gap:12px;overflow:auto}
+.evidence figure{margin:0;min-width:280px;max-width:400px}.evidence img{width:100%;cursor:pointer;border-radius:6px}
+[hidden]{display:none!important}@media(max-width:720px){.cameras{grid-template-columns:1fr}body{padding:0 14px}}
+</style>
+<header><h1>UMI-T · 原子任务测试</h1><span id="task" class="muted"></span></header>
+<p class="muted">对照任务物体与场景，检查完整动作过程和末态。</p>
+<div class="toolbar">
+<select id="episode" aria-label="选择采集记录"></select>
+<button id="prepare">准备视频</button>
+<button id="review" class="primary">开始审核</button>
+<a href="/docs" class="muted">API 文档</a>
+</div>
+<p id="notice" role="status" class="muted">正在加载记录…</p>
+<section id="videos" hidden>
+<h2>三路拼接</h2><video id="stitched" controls preload="metadata"></video>
+<div class="cameras">
+<div><p class="muted">主镜头</p><video id="main" controls preload="metadata"></video></div>
+<div><p class="muted">左腕</p><video id="left_wrist" controls preload="metadata"></video></div>
+<div><p class="muted">右腕</p><video id="right_wrist" controls preload="metadata"></video></div>
+</div></section>
+<section id="result" hidden>
+<h2 id="conclusion"></h2><p id="reason"></p><p id="comparison" class="muted"></p>
+<table><thead><tr><th>检查项</th><th>判定</th><th>证据时间</th></tr></thead><tbody id="checks"></tbody></table>
+<h2>时序观察</h2><ol id="observations"></ol>
+<h2>证据帧</h2><div id="evidence" class="evidence"></div>
+</section>
+<section><h2>开发集进度</h2><p id="stats" class="muted">尚未统计</p></section>
+<script>
+const $=id=>document.getElementById(id);
+const state={rows:[],result:null,media:null};
+const names={object_match:"物体一致",scene_match:"场景一致",main_visibility:"主镜头可见性",image_quality:"画面质量",action:"任务动作",retry_free:"无失败重试",completeness:"动作完整性",hold:"持续悬空"};
+const labels={correct:"通过",incorrect:"不通过",needs_review:"待复核",failed:"处理失败",not_run:"未审核",completed:"已审核",pass:"符合",fail:"不符合",unknown:"待确认"};
+async function request(path,options={}){
+  const response=await fetch(path,options);
+  const data=await response.json();
+  if(!response.ok)throw new Error(data.detail||"请求失败");
+  return data;
+}
+function busy(value){for(const id of ["episode","prepare","review"])$(id).disabled=value}
+function showMedia(media){
+  state.media=media;$("videos").hidden=false;
+  for(const name of ["stitched","main","left_wrist","right_wrist"]){
+    const item=media.videos[name];$(name).hidden=!item;
+    if(item)$(name).src=item.url;else $(name).removeAttribute("src");
+  }
+}
+function showResult(result){
+  state.result=result;$("result").hidden=false;
+  $("conclusion").textContent=labels[result.label||result.status]||result.status;
+  $("reason").textContent=result.reason||"";
+  $("comparison").textContent="GT："+(labels[result.evaluation?.gt]||"无标签")+(result.cached?" · 复用已有结果":"");
+  $("review").textContent=result.status==="failed"?"重试失败任务":"开始审核";
+  $("checks").replaceChildren();$("observations").replaceChildren();$("evidence").replaceChildren();
+  const evidence=new Map((result.evidence||[]).map(frame=>[frame.frame_id,frame]));
+  for(const [name,check] of Object.entries({...result.checks,...(result.hold?{hold:result.hold}:{})})){
+    const row=document.createElement("tr");
+    for(const value of [names[name]||name,labels[check.state],check.evidence_ids.map(id=>evidence.get(id)?.time_s.toFixed(2)+"s").join("、")]){
+      const cell=document.createElement("td");cell.textContent=value;row.append(cell);
+    }
+    row.children[1].className=check.state;$("checks").append(row);
+  }
+  for(const item of result.observations||[]){
+    const li=document.createElement("li");li.textContent=item.description;$("observations").append(li);
+  }
+  for(const frame of result.evidence||[]){
+    const figure=document.createElement("figure"),img=document.createElement("img"),caption=document.createElement("figcaption");
+    img.src="/assets/"+result.episode_id+"/"+frame.path.split("/").pop();
+    img.alt=frame.time_s.toFixed(2)+"秒三路证据帧";
+    img.onclick=()=>{if(state.media){$("stitched").currentTime=frame.video_time_s||0}};
+    caption.textContent=frame.time_s.toFixed(2)+" 秒";figure.append(img,caption);$("evidence").append(figure);
+  }
+}
+async function stats(){
+  const report=await request("/report"),n=report.counts;
+  $("stats").textContent="共 "+n.total+" 条 · 已判定 "+n.completed+" · 待复核 "+n.needs_review+" · 处理失败 "+n.failed+" · 未审核 "+n.not_run+" · 误放 "+n.false_accept+" · 误拒 "+n.false_reject;
+}
+async function selected(){
+  state.result=null;state.media=null;$("result").hidden=true;$("videos").hidden=true;$("review").textContent="开始审核";
+  const id=$("episode").value;
+  const [result,media]=await Promise.all([
+    fetch("/results/"+id).then(r=>r.ok?r.json():null),
+    fetch("/media/"+id).then(r=>r.ok?r.json():null)]);
+  if($("episode").value!==id)return;
+  if(media)showMedia(media);if(result)showResult(result);
+  $("notice").textContent="可先准备视频查看，再开始审核。";
+}
+async function action(runReview){
+  const id=$("episode").value;busy(true);$("notice").textContent=runReview?"正在审核完整时序…":"正在对齐三路视频…";
+  try{
+    if(runReview){
+      const result=await request("/reviews",{method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({episode_id:id,retry_failed:state.result?.status==="failed"})});
+      showResult(result);
+    }else showMedia(await request("/media/"+id,{method:"POST"}));
+    const response=await fetch("/media/"+id);if(response.ok)showMedia(await response.json());
+    await stats();$("notice").textContent=runReview?"审核结束。":"视频已准备。";
+  }catch(error){$("notice").textContent=error.message}
+  finally{busy(false)}
+}
+$("episode").onchange=()=>selected().catch(error=>$("notice").textContent=error.message);
+$("prepare").onclick=()=>action(false);$("review").onclick=()=>action(true);
+(async()=>{
+  const [rows,settings]=await Promise.all([request("/episodes"),request("/settings")]);state.rows=rows;
+  $("task").textContent="任务类型："+Object.values(settings.profiles).map(p=>p.display_name||"原子任务").join("、");
+  for(const row of rows){const option=document.createElement("option");option.value=row.episode_id;
+    option.textContent=row.task_code+" · "+row.episode_id.slice(0,10)+" · "+labels[row.status];$("episode").append(option)}
+  if(rows.length)await selected();else{busy(true);$("notice").textContent="当前没有可审核记录。"}
+  await stats();
+})().catch(error=>$("notice").textContent=error.message);
+</script>
+</html>

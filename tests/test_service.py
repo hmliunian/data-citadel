@@ -1,52 +1,8 @@
-import copy
 import json
-from pathlib import Path
 
 import pytest
 
-from citadel.data import file_hash, fingerprint, prepare, write
-from citadel.service import BusyError, GateError, Service
-
-
-@pytest.fixture
-def service_case(tmp_path, dataset, model_case, answer, jpeg):
-    _, resources, profile, media = model_case
-    work = tmp_path / "run"
-    prepare(dataset, work)
-    (work / "image.jpg").write_bytes(jpeg)
-    profiles = work / "rules.json"
-    write(profiles, {"grasp": {**profile, "action_ids": ["A_001"]}})
-    resources = {**resources, "task_code": "DL-TEST"}
-    resources["sha256"] = fingerprint(resources)
-    class FakeClient:
-        model, base_url = "fake-qwen", "https://example.invalid/v1"
-        def __init__(self):
-            self.requests = []
-            self.error = None
-        def complete(self, request_messages, context):
-            self.requests.append(copy.deepcopy(request_messages))
-            if self.error:
-                raise self.error
-            return {"data": copy.deepcopy(answer), "model": self.model, "usage": {}}
-    client = FakeClient()
-    def load_media(output, source, sampling):
-        assert set(source) == {"episode_id", "mcap_path", "mcap_sha256"}
-        assert file_hash(Path(source["mcap_path"])) == source["mcap_sha256"]
-        result = copy.deepcopy(media)
-        result["episode_id"] = source["episode_id"]
-        folder = work / "media" / source["episode_id"]
-        folder.mkdir(parents=True, exist_ok=True)
-        for frame in result["frames"]:
-            path = folder / (frame["frame_id"] + ".jpg")
-            path.write_bytes(jpeg)
-            frame["path"] = str(path.relative_to(work))
-        result["videos"] = {}
-        if not (folder / "media.json").exists():
-            write(folder / "media.json", result)
-        return result
-    service = Service(work, profiles, client=client,
-                      resource_loader=lambda *args: resources, media_loader=load_media)
-    return service, client
+from citadel.service import BusyError, GateError
 
 
 def test_gt_never_sent_and_result_reused(service_case):

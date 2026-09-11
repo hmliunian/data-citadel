@@ -13,6 +13,7 @@
       "中途才开始录制或必要动作结束前停止"
     ],
     "hold_seconds": 2,
-    "hold_tolerance_s": 0.2
+    "hold_tolerance_s": 0.2,
+    "display_name": "抓取"
   }
 }
