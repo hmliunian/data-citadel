@@ -27,7 +27,8 @@ def fetch(code: str, work: Path, base_url: str = DEFAULT_BASE, *, client=None):
     cache = work / "resources" / code / "task.json"
     if cache.exists():
         saved = read(cache)
-        if saved["task_code"] != code:
+        if (saved["task_code"] != code or
+                fingerprint({k: v for k, v in saved.items() if k != "sha256"}) != saved["sha256"]):
             raise ValueError("Cached task mismatch")
         for item in saved["images"]:
             image_input(work, item)
