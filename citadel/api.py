@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from .data import file_hash, read
 from .service import BusyError, GateError, Service
+from .sensors import read_gripper
 
 
 class ReviewRequest(BaseModel):
@@ -38,6 +39,9 @@ def create_app(service: Service):
         if not path.exists():
             raise KeyError("Prepare this episode's video first")
         result = read(path)
+        signals = path.with_name("gripper.json")
+        if signals.exists():
+            result["gripper"] = read_gripper(signals)
         for asset in result["frames"] + list(result["videos"].values()):
             asset["url"] = f"/assets/{episode_id}/{Path(asset['path']).name}"
         return result

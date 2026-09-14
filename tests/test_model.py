@@ -147,3 +147,20 @@ def test_supported_new_qwen_runs_without_hidden_thinking(model_case, answer, mod
     assert trace["parameters"]["enable_thinking"] is False
     context = json.loads(seen[0]["messages"][1]["content"][0]["text"])
     assert context["camera_ranges"]["main"] == {"first_frame_id": "V000", "last_frame_id": "V003"}
+
+
+
+def test_gripper_extrema_are_bound_to_video_time_without_gt(model_case):
+    work, resources, profile, media = model_case
+    media["gripper"] = {
+        "sha256": "verified-signal-hash", "warnings": ["right_position:missing"],
+        "channels": {"left_position": {"samples": [[0.35, 20], [0.39, 100]]}},
+        "gt": "private-review-label",
+    }
+    sent = messages(work, resources, profile, media)
+    content = [json.loads(p["text"]) for p in sent[1]["content"] if p["type"] == "text"]
+    candidate = next(p["candidate_frame"] for p in content if p.get("candidate_frame", {}).get("frame_id") == "V001")
+    assert candidate["gripper_before"] == [[0.3, 0.4, [20, 100], None, None, None, None, None]]
+    assert len(next(p["gripper_columns"] for p in content if "gripper_columns" in p)) == 8
+    assert "private-review-label" not in json.dumps(sent)
+    assert "原始joint_position" in sent[0]["content"]

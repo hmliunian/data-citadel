@@ -10,7 +10,8 @@ from mcap.reader import make_reader
 from PIL import Image, ImageDraw, ImageFont
 
 from .data import file_hash, read, write
-from .flatbuffer import VideoSchema
+from .flatbuffer import Schema
+from .sensors import prepare_gripper
 
 TOPICS = {
     "main": "/camera/coracam_head/left_h264/video",
@@ -35,7 +36,7 @@ def decode(source: Path, topics: dict):
             if schema is None or schema.encoding not in ("flatbuffer", "flatbuffers"):
                 raise ValueError("Unsupported camera encoding")
             if schema.id not in schemas:
-                schemas[schema.id] = VideoSchema(schema.data)
+                schemas[schema.id] = Schema(schema.data)
             video = schemas[schema.id].decode(message.data)
             if video["format"] != "h264":
                 raise ValueError("Unsupported video codec")
@@ -178,6 +179,7 @@ def prepare_media(work: Path, episode: dict, sampling: dict, topics=None):
             path = (work / asset["path"]).resolve()
             if not path.is_relative_to(work.resolve()) or file_hash(path) != asset["sha256"]:
                 raise ValueError("Cached media changed")
-        return media
-    origin, streams, warnings = decode(source, signature["topics"])
-    return render(work, episode["episode_id"], origin, streams, signature, warnings)
+    else:
+        origin, streams, warnings = decode(source, signature["topics"])
+        media = render(work, episode["episode_id"], origin, streams, signature, warnings)
+    return {**media, "gripper": prepare_gripper(source, cache.parent, media["origin_ns"], actual)}

@@ -37,6 +37,9 @@ video{width:100%;background:#090d12;border-radius:8px;max-height:420px}.cameras{
 <div><p class="muted">左腕完整视频 · <a id="download_left_wrist" class="muted" download>下载 MP4</a></p><video id="left_wrist" controls preload="metadata"></video></div>
 <div><p class="muted">右腕完整视频 · <a id="download_right_wrist" class="muted" download>下载 MP4</a></p><video id="right_wrist" controls preload="metadata"></video></div>
 </div></section>
+<section id="signals" hidden><h2>夹爪与触觉时序</h2>
+<p class="muted">点击曲线定位对应视频时间。触觉强度为测点力向量模长之和，用于比较受力变化。</p>
+<canvas id="gripper" width="1200" height="370" style="width:100%;cursor:crosshair" aria-label="夹爪位置和指尖受力曲线"></canvas></section>
 <section id="result" hidden>
 <h2 id="conclusion"></h2><p id="reason"></p><p id="comparison" class="muted"></p>
 <table><thead><tr><th>检查项</th><th>判定</th><th>证据时间</th></tr></thead><tbody id="checks"></tbody></table>
@@ -57,13 +60,47 @@ async function request(path,options={}){
 }
 function busy(value){for(const id of ["filter","episode","prepare","review"])$(id).disabled=value}
 function showMedia(media){
-  state.media=media;$("videos").hidden=false;
+  state.media=media;$("videos").hidden=false;showGripper(media);
   for(const name of ["stitched","main","left_wrist","right_wrist"]){
     const item=media.videos[name];$(name).hidden=!item;
     if(item)$(name).src=item.url;else $(name).removeAttribute("src");
     const link=$("download_"+name);
     if(link&&item){link.href=item.url;link.download=$("episode").value+"_"+name+".mp4"}
   }
+}
+function showGripper(media, cursor=null){
+  const channels=media.gripper?.channels||{}, entries=Object.entries(channels).filter(([,c])=>c.samples.length);
+  $("signals").hidden=!entries.length;if(!entries.length)return;
+  const canvas=$("gripper"),ctx=canvas.getContext("2d"),left=70,right=1180;
+  const end=Math.max(...entries.map(([,c])=>c.samples.at(-1)[0]));if(end<=0)return;
+  ctx.clearRect(0,0,canvas.width,canvas.height);ctx.font="14px sans-serif";
+  const legend={left_position:["左夹爪","#7fb8ff"],right_position:["右夹爪","#ffbd71"],
+    left_finger0:["左指0","#7fb8ff"],left_finger1:["左指1","#ba9bff"],
+    right_finger0:["右指0","#ffbd71"],right_finger1:["右指1","#ed8ba6"]};
+  for(const [row,isPosition] of [true,false].entries()){
+    const series=entries.filter(([name])=>name.endsWith("_position")===isPosition),top=30+row*170,bottom=top+120;
+    const values=series.flatMap(([,c])=>c.samples.map(p=>p[1]));
+    const low=values.reduce((a,b)=>Math.min(a,b),0),high=values.reduce((a,b)=>Math.max(a,b),1);
+    const x=t=>left+t/end*(right-left),y=v=>bottom-(v-low)/(high-low)*(bottom-top);
+    ctx.fillStyle="#c6d1db";ctx.fillText(isPosition?"夹爪位置（原始值）":"触觉相对强度（未标定）",left,top-12);
+    ctx.strokeStyle="#374653";ctx.beginPath();ctx.moveTo(left,top);ctx.lineTo(left,bottom);ctx.lineTo(right,bottom);ctx.stroke();
+    ctx.fillText(high.toFixed(1),5,top+5);ctx.fillText(low.toFixed(1),5,bottom);
+    series.forEach(([name,channel],i)=>{
+      const [label,color]=legend[name];ctx.strokeStyle=color;ctx.beginPath();
+      channel.samples.forEach(([t,v],j)=>j&&t-channel.samples[j-1][0]<=0.1?ctx.lineTo(x(t),y(v)):ctx.moveTo(x(t),y(v)));ctx.stroke();
+      ctx.fillStyle=color;ctx.fillText(label,650+i*120,top-12);
+    });
+    for(let i=0;i<=5;i++){ctx.fillStyle="#9eafbf";ctx.fillText((end*i/5).toFixed(1)+"s",x(end*i/5)-10,bottom+20)}
+    if(cursor!==null){ctx.strokeStyle="#83d8ab";ctx.beginPath();ctx.moveTo(x(cursor),top);ctx.lineTo(x(cursor),bottom);ctx.stroke()}
+  }
+  canvas.onclick=event=>{
+    const rect=canvas.getBoundingClientRect(),x=(event.clientX-rect.left)*canvas.width/rect.width;
+    const time=Math.max(0,Math.min(end,(x-left)/(right-left)*end));
+    for(const [name,item] of Object.entries(media.videos)){
+      const video=$(name);if(video?.readyState)video.currentTime=Math.max(0,Math.min(video.duration,time-item.start_s));
+    }
+    showGripper(media,time);
+  };
 }
 function showResult(result){
   state.result=result;$("result").hidden=false;
@@ -103,7 +140,7 @@ async function stats(){
   $("stats").textContent="共 "+n.total+" 条 · 已判定 "+n.completed+" · 待复核 "+n.needs_review+" · 处理失败 "+n.failed+" · 未审核 "+n.not_run+" · 误放 "+n.false_accept+" · 误拒 "+n.false_reject;
 }
 async function selected(){
-  state.result=null;state.media=null;$("result").hidden=true;$("videos").hidden=true;$("review").textContent="开始审核";
+  state.result=null;state.media=null;$("result").hidden=true;$("videos").hidden=true;$("signals").hidden=true;$("review").textContent="开始审核";
   for(const video of document.querySelectorAll("video")){video.pause();video.removeAttribute("src");video.load()}
   const id=$("episode").value;
   if(!id){$("notice").textContent="当前没有符合筛选的记录。";return}

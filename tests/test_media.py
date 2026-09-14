@@ -2,7 +2,7 @@ import av
 import pytest
 from PIL import Image
 
-from citadel.flatbuffer import VideoSchema
+from citadel.flatbuffer import Schema
 from citadel.media import TOPICS, nearest, render
 
 
@@ -56,4 +56,4 @@ def test_gap_is_blank_and_missing_camera_is_not_disguised(tmp_path):
 
 def test_non_bfbs_schema_is_rejected():
     with pytest.raises(ValueError, match="schema"):
-        VideoSchema(b"not a schema")
+        Schema(b"not a schema")

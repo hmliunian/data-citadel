@@ -15,6 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from .data import fingerprint, write
 from .resources import image_input
+from .sensors import TOPICS as GRIPPER_CHANNELS, intervals
 
 CHECKS = ("object_match", "scene_match", "main_visibility", "image_quality",
           "action", "retry_free", "completeness")
@@ -62,6 +63,16 @@ reason：简短中文原因。不输出总体标签，由程序汇总。
 只引用实际candidate_frame ID；参考图不能作候选行为证据。pass/fail必须有证据，unknown可为空。
 """
 
+GRIPPER_PROMPT = """补充输入包含与视频共用时间原点的夹爪信号，gripper_before给出上一张候选帧至本帧之间的0.1秒区间极值。
+每行是[起时刻,止时刻,左夹爪位置min/max,右夹爪位置min/max,左指0触觉min/max,左指1触觉min/max,右指0触觉min/max,右指1触觉min/max]。
+位置是原始joint_position，须结合视频确认开合方向，不能当作末端高度；触觉是各测点的力向量模长之和，只是相对受力代理，单位未校准。
+null表示该区间无样本，恒定零或恒定非零不能单独证明接触/失效，未使用的另一夹爪可保持不动。
+结合信号与视频检查“执行夹取但没有带起物体，随后松开重新夹取”、空夹后重来、受力后滑落再夹等明确失败。
+受力上升只证明可能接触，不证明物体离桌；受力下降、位置变化或多个峰本身不能证明失败。
+正常抓取前接近、闭合前对齐、受控调整、换手不应误判；一次明确失败即retry_free=fail，之后成功不抵消。
+信号解释写入observations，引用包含该区间的candidate_frame及相邻视频帧ID；具体时间写入description。身份和场景仍靠视觉，不能据GT或信号推断物品身份。
+方向不确定时只描述数值升降，结合视频说明开合；不要把位置数值下降自动描述成张开。
+"""
 
 class Check(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -104,11 +115,21 @@ def messages(work: Path, resources: dict, profile: dict, media: dict):
                 {"reference_type": item["type"], "name": item["name"], "id": item["id"]},
                 ensure_ascii=False)},
             {"type": "image_url", "image_url": {"url": image_input(work, item)}}])
+    gripper = media.get("gripper")
+    if gripper:
+        content.insert(1, {"type": "text", "text": json.dumps({
+            "gripper_columns": ["start_s", "end_s", *GRIPPER_CHANNELS],
+            "gripper_warnings": gripper["warnings"],
+            "gripper_sha256": gripper["sha256"],
+        }, ensure_ascii=False)})
+        for timing, samples in zip(timeline, intervals(gripper, media["frames"])):
+            timing["gripper_before"] = samples
     for frame, timing in zip(media["frames"], timeline):
         content.extend([
             {"type": "text", "text": json.dumps({"candidate_frame": timing}, ensure_ascii=False)},
             {"type": "image_url", "image_url": {"url": image_input(work, frame)}}])
-    return [{"role": "system", "content": PROMPT}, {"role": "user", "content": content}]
+    return [{"role": "system", "content": PROMPT + ("\n" + GRIPPER_PROMPT if gripper else "")},
+            {"role": "user", "content": content}]
 
 
 def safe_messages(value):
