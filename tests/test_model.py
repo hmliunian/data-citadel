@@ -119,7 +119,8 @@ def test_mid_video_hold_does_not_prove_final_airborne_state(model_case, answer):
     assert decide(answer, media, profile)["status"] == "needs_review"
 
 
-def test_supported_new_qwen_runs_without_hidden_thinking(model_case, answer):
+@pytest.mark.parametrize("model", ["qwen3.5-plus-2026-02-15", "qwen3.8-max-0902"])
+def test_supported_new_qwen_runs_without_hidden_thinking(model_case, answer, model):
     work, resources, profile, media = model_case
     seen = []
     def respond(request):
@@ -127,7 +128,7 @@ def test_supported_new_qwen_runs_without_hidden_thinking(model_case, answer):
         seen.append(payload)
         return httpx.Response(200, json={"choices": [{
             "finish_reason": "stop", "message": {"content": json.dumps(answer)}}]})
-    client = Qwen(work, model="qwen3.5-plus-2026-02-15", api_key="secret",
+    client = Qwen(work, model=model, api_key="secret",
                   transport=httpx.MockTransport(respond))
     result = client.complete(messages(work, resources, profile, media))
     assert seen[0]["enable_thinking"] is False

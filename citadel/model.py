@@ -146,7 +146,7 @@ class Qwen:
             raise ValueError("Total image input exceeds this workflow's 250-image limit")
         payload = {"model": self.model, "messages": request_messages, "temperature": 0,
                    "max_tokens": 5000, "response_format": {"type": "json_object"}}
-        if self.model.startswith(("qwen3.5-plus", "qwen3-vl-plus", "qwen3-vl-flash")):
+        if self.model.startswith(("qwen3.8-max", "qwen3.5-plus", "qwen3-vl-plus", "qwen3-vl-flash")):
             payload["enable_thinking"] = False
         with httpx.Client(timeout=httpx.Timeout(180, connect=15), transport=self.transport) as client:
             for attempt in range(2):
