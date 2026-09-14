@@ -80,3 +80,40 @@ def test_invalid_response_is_failed_not_business_rejection(service_case, answer)
     result = service.review(service.manifest["splits"]["development"][0])
     assert result["status"] == "failed" and result["error"]["stage"] == "evidence"
     assert result["label"] is None and "model_call" in result
+
+
+def test_batch_is_bounded_resumable_and_exclusive(service_case):
+    import threading
+    service, client = service_case
+    original = client.complete
+    lock, ready = threading.Lock(), threading.Event()
+    active, peak = 0, 0
+    def complete(*args, **kwargs):
+        nonlocal active, peak
+        with lock:
+            active += 1
+            peak = max(active, peak)
+            if active == 2:
+                ready.set()
+        assert ready.wait(3), "Batch did not run two independent candidates concurrently"
+        with pytest.raises(BusyError):
+            service.review(service.manifest["splits"]["development"][0])
+        value = original(*args, **kwargs)
+        with lock:
+            active -= 1
+        return value
+    client.complete = complete
+    results = list(service.run(workers=2))
+    assert len(results) == 6 and peak == 2
+    assert all(r["status"] == "completed" for r in results)
+    assert len({r["configuration_sha256"] for r in results}) == 1
+    assert all(r["cached"] for r in service.run(workers=2))
+    assert len(client.requests) == 6
+
+
+def test_changed_code_cannot_be_mislabeled_as_loaded_version(service_case, monkeypatch):
+    service, client = service_case
+    monkeypatch.setattr("citadel.service.code_version", lambda: {"model.py": "changed"})
+    with pytest.raises(GateError, match="restart"):
+        service.review(service.manifest["splits"]["development"][0])
+    assert client.requests == []

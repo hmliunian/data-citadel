@@ -20,9 +20,10 @@ def main(argv=None):
     review = commands.add_parser("review", help="Review one candidate")
     review.add_argument("episode_id")
     review.add_argument("--retry-failed", action="store_true")
-    run = commands.add_parser("run", help="Review a split sequentially; each uncached candidate calls Qwen")
+    run = commands.add_parser("run", help="Review a split with bounded concurrency; uncached candidates call Qwen")
     run.add_argument("--split", choices=["development", "holdout"], default="development")
     run.add_argument("--limit", type=int)
+    run.add_argument("--workers", type=int, default=3)
     run.add_argument("--retry-failed", action="store_true")
     commands.add_parser("freeze", help="Freeze after all development candidates are processed")
     report = commands.add_parser("report", help="Export counts, errors, usage and candidate rows")
@@ -50,12 +51,9 @@ def main(argv=None):
     elif args.command == "run":
         if args.limit is not None and args.limit < 1:
             parser.error("--limit must be positive")
-        rows = service.episodes(args.split)
-        if args.limit:
-            rows = rows[:args.limit]
         failed = False
-        for row in rows:
-            result = service.review(row["episode_id"], args.retry_failed)
+        for result in service.run(args.split, workers=args.workers, limit=args.limit,
+                                  retry_failed=args.retry_failed):
             failed |= result["status"] == "failed"
             emit({k: result.get(k) for k in ("episode_id", "status", "label", "reason", "cached")})
         return int(failed)

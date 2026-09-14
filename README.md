@@ -41,7 +41,7 @@ Qwen 凭据从 `QWEN_API_KEY` / `DASHSCOPE_API_KEY` 或 `Qwen-api/qwen_api_key.t
 **验证与扩展**
 
 - `review EPISODE_ID [--retry-failed]`：单条审核。
-- `run --split development [--limit N]`：顺序审核开发集。
+- `run --split development [--workers 3] [--limit N]`：批量审核开发集，默认最多 3 条并发。
 - `report --split development`：导出完整分母统计及 JSONL，包含未运行、待复核、处理失败、误放、误拒和已知 token 用量。
 - `freeze`：开发集全部处理且无执行错误后冻结代码、prompt、模型设置和任务参考资源，之后才开放 `holdout`。
 - `run --split holdout`：留出集验证。修改冻结内容需新建试验；已看过的记录不能再宣称为独立测试集。

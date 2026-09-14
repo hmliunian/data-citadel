@@ -4,6 +4,7 @@ from __future__ import annotations
 import fcntl
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -19,6 +20,13 @@ class BusyError(RuntimeError):
 
 class GateError(RuntimeError):
     pass
+
+
+def code_version():
+    return {p.name: file_hash(p) for p in sorted(Path(__file__).parent.glob("*.py"))}
+
+
+LOADED_CODE = code_version()
 
 
 class Service:
@@ -47,9 +55,12 @@ class Service:
         if manifest["sha256"] != self.manifest["sha256"]:
             raise ValueError("Manifest was replaced; open a new service")
         profiles = read(self.profiles_path)
+        current_code = code_version()
+        if current_code != LOADED_CODE:
+            raise GateError("Code changed; restart the service before reviewing")
         config = {
             "manifest_sha256": manifest["sha256"], "profiles": profiles,
-            "code": {p.name: file_hash(p) for p in sorted(Path(__file__).parent.glob("*.py"))},
+            "code": current_code,
             "model": self.client.model, "base_url": self.client.base_url,
             "resource_base": self.resource_base,
         }
@@ -109,50 +120,70 @@ class Service:
     def review(self, episode_id, retry_failed=False):
         with self.lock():
             config, signature = self.configuration()
-            split = self.split_of(episode_id)
+            return self._review(episode_id, retry_failed, config, signature)
+
+    def run(self, split="development", *, workers=3, limit=None, retry_failed=False):
+        if not 1 <= workers <= 8 or limit is not None and limit < 1:
+            raise ValueError("Use 1 to 8 workers and a positive limit")
+        with self.lock():
+            config, signature = self.configuration()
             self.gate(split, signature)
-            episode = self.manifest["episodes"][episode_id]
-            existing = self.latest(episode_id, signature)
-            result = {
-                "result_id": uuid.uuid4().hex, "episode_id": episode_id,
-                "task_code": episode["task_code"], "split": split,
-                "configuration_sha256": signature, "created_at": now(),
-                "status": "failed", "label": None,
-            }
-            stage = "source"
-            try:
-                task = Path(self.manifest["dataset"]) / "tasks" / episode["task_code"]
-                paths = {"tags_sha256": task / "api_tags" / (episode_id + ".json"),
-                         "receipt_sha256": Path(self.manifest["dataset"]) / "receipts" / (episode_id + ".json")}
-                if any(file_hash(path) != episode[key] for key, path in paths.items()):
-                    raise ValueError("Source metadata changed")
-                stage = "resources"
-                resources = self.resource_loader(episode["task_code"], self.work, self.resource_base)
-                profile = profile_for(resources, config["profiles"])
-                stage = "media"
-                source = {k: episode[k] for k in ("episode_id", "mcap_path", "mcap_sha256")}
-                media = self.media_loader(self.work, source, self.manifest["sampling"])
-                result.update(resources_sha256=resources["sha256"], task_profile=profile["name"],
-                              media_path=f"media/{episode_id}/media.json")
-                if existing and not (retry_failed and existing["status"] == "failed"):
-                    if existing.get("resources_sha256") not in (None, resources["sha256"]):
-                        raise ValueError("References changed; prepare a new run")
-                    return {**existing, "cached": True}
-                stage = "model"
-                response = self.client.complete(messages(self.work, resources, profile, media), {
-                    k: result[k] for k in ("result_id", "episode_id", "task_code", "split",
-                                          "configuration_sha256")})
-                result["model_call"] = {k: v for k, v in response.items() if k != "data"}
-                stage = "evidence"
-                result.update(decide(response["data"], media, profile))
-            except Exception as exc:
-                # Responses are retained separately; do not expose URLs, keys or vendor error bodies.
-                result.update(reason=f"处理失败：{stage} / {type(exc).__name__}",
-                              error={"stage": stage, "type": type(exc).__name__})
-            result["evaluation"] = {"gt": episode["gt"], "gt_reason": episode["gt_reason"]}
-            write(self.work / "results" / signature / episode_id /
-                  f"{time.time_ns()}-{result['result_id']}.json", result)
-            return {**result, "cached": False}
+            ids = self.manifest["splits"][split][:limit]
+            # Cache shared reference images once before independent episode workers start.
+            codes = {self.manifest["episodes"][i]["task_code"] for i in ids}
+            for code in sorted(codes):
+                resources = self.resource_loader(code, self.work, self.resource_base)
+                profile_for(resources, config["profiles"])
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                futures = [pool.submit(self._review, i, retry_failed, config, signature) for i in ids]
+                for future in as_completed(futures):
+                    yield future.result()
+
+    def _review(self, episode_id, retry_failed, config, signature):
+        split = self.split_of(episode_id)
+        self.gate(split, signature)
+        episode = self.manifest["episodes"][episode_id]
+        existing = self.latest(episode_id, signature)
+        result = {
+            "result_id": uuid.uuid4().hex, "episode_id": episode_id,
+            "task_code": episode["task_code"], "split": split,
+            "configuration_sha256": signature, "created_at": now(),
+            "status": "failed", "label": None,
+        }
+        stage = "source"
+        try:
+            task = Path(self.manifest["dataset"]) / "tasks" / episode["task_code"]
+            paths = {"tags_sha256": task / "api_tags" / (episode_id + ".json"),
+                     "receipt_sha256": Path(self.manifest["dataset"]) / "receipts" / (episode_id + ".json")}
+            if any(file_hash(path) != episode[key] for key, path in paths.items()):
+                raise ValueError("Source metadata changed")
+            stage = "resources"
+            resources = self.resource_loader(episode["task_code"], self.work, self.resource_base)
+            profile = profile_for(resources, config["profiles"])
+            stage = "media"
+            source = {k: episode[k] for k in ("episode_id", "mcap_path", "mcap_sha256")}
+            media = self.media_loader(self.work, source, self.manifest["sampling"])
+            result.update(resources_sha256=resources["sha256"], task_profile=profile["name"],
+                          media_path=f"media/{episode_id}/media.json")
+            if existing and not (retry_failed and existing["status"] == "failed"):
+                if existing.get("resources_sha256") not in (None, resources["sha256"]):
+                    raise ValueError("References changed; prepare a new run")
+                return {**existing, "cached": True}
+            stage = "model"
+            response = self.client.complete(messages(self.work, resources, profile, media), {
+                k: result[k] for k in ("result_id", "episode_id", "task_code", "split",
+                                      "configuration_sha256")})
+            result["model_call"] = {k: v for k, v in response.items() if k != "data"}
+            stage = "evidence"
+            result.update(decide(response["data"], media, profile))
+        except Exception as exc:
+            # Responses are retained separately; do not expose URLs, keys or vendor error bodies.
+            result.update(reason=f"处理失败：{stage} / {type(exc).__name__}",
+                          error={"stage": stage, "type": type(exc).__name__})
+        result["evaluation"] = {"gt": episode["gt"], "gt_reason": episode["gt_reason"]}
+        write(self.work / "results" / signature / episode_id /
+              f"{time.time_ns()}-{result['result_id']}.json", result)
+        return {**result, "cached": False}
 
     def freeze(self):
         with self.lock():
