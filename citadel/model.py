@@ -48,11 +48,13 @@ NO FRAME是相机时间对齐产生的技术空位；不能据此判物体消失
 正常相机启停时间差不能直接判动作不完整；需结合三路有效画面确认是否缺失必要过程。
 若要求hold_seconds，必须确认持续受控悬空约该时长并核对最终仍悬空；中途抓起、最后放回不能通过。
 未看见成功不自动证明失败；只有可见反证才fail。真实证据不足用unknown，不编造遗漏的接触或失败细节。
-返回一个JSON对象：
+返回一个JSON对象，顶层必须恰好有四个字段：observations、checks、hold、reason。
+hold与checks同级，绝不能嵌入checks；checks内部恰好是下面七项。
 observations：按时间记录可见事实，列表元素为{phase,description,evidence_ids}。
 描述候选外观/操作区域、夹具与物体状态、每次明确失败及末态。可将相同状态的相邻帧合并，引用对应ID。
 phase仅用start、action、hold、release、failure、end、uncertain；failure仅用于明确动作失败/失控。
-start/end分别引用给定首尾ID；技术空位或普通调整不用failure。
+必须分别有phase=start和phase=end的观察，引用给定first_frame_id和last_frame_id；
+即使首帧某路NO FRAME也保留start，可同时引用随后有效帧说明真实初态。技术空位或普通调整不用failure。
 checks：object_match、scene_match、main_visibility、image_quality、action、retry_free、completeness七项，
 每项为{state:"pass|fail|unknown",evidence_ids:["V000"]}。main_visibility的证据必须包含主镜头有效画面。
 hold：任务有hold_seconds时用同样结构，引用连续悬空的起止与中间证据，并覆盖末态；否则为null。
