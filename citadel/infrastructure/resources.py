@@ -8,7 +8,8 @@ from pathlib import Path
 import httpx
 from PIL import Image
 
-from .data import TASK, file_hash, fingerprint, read, write
+from .datasets import TASK
+from .files import file_hash, fingerprint, read, write
 
 DEFAULT_BASE = "http://172.100.11.189:8001"
 

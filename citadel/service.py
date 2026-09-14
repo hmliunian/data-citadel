@@ -8,10 +8,15 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import contextmanager
 from pathlib import Path
 
-from .data import ID, file_hash, fingerprint, load_manifest, now, profile_for, read, write
-from .media import prepare_media
-from .model import Qwen, decide, messages, quality_messages
-from .resources import DEFAULT_BASE, fetch
+from .infrastructure.datasets import ID, load_manifest
+from .infrastructure.files import file_hash, fingerprint, now, read, write
+from .domain.tasks import profile_for
+from .domain.decision import decide
+from .application.prompts import PromptBuilder
+from .configuration import PromptBundle
+from .infrastructure.mcap.media import prepare_media
+from .infrastructure.qwen import QwenGateway
+from .infrastructure.resources import DEFAULT_BASE, fetch
 
 
 class BusyError(RuntimeError):
@@ -23,7 +28,8 @@ class GateError(RuntimeError):
 
 
 def code_version():
-    return {p.name: file_hash(p) for p in sorted(Path(__file__).parent.glob("*.py"))}
+    return {str(p.relative_to(Path(__file__).parent)): file_hash(p)
+            for p in sorted(Path(__file__).parent.rglob("*.py"))}
 
 
 LOADED_CODE = code_version()
@@ -34,7 +40,7 @@ class Service:
                  resource_loader=fetch, media_loader=prepare_media, resource_base=DEFAULT_BASE):
         self.work, self.profiles_path = work.resolve(), profiles.resolve()
         self.manifest = load_manifest(self.work)
-        self.client = client or Qwen(self.work)
+        self.client = client or QwenGateway(self.work)
         self.resource_loader, self.media_loader = resource_loader, media_loader
         self.resource_base = resource_base
 
@@ -62,7 +68,7 @@ class Service:
             "manifest_sha256": manifest["sha256"], "profiles": profiles,
             "code": current_code,
             "model": self.client.model, "base_url": self.client.base_url,
-            "resource_base": self.resource_base,
+            "resource_base": self.resource_base, "prompts": PromptBundle.load().as_dict(),
         }
         return config, fingerprint(config)
 
@@ -172,10 +178,11 @@ class Service:
             stage = "model"
             context = {k: result[k] for k in (
                 "result_id", "episode_id", "task_code", "split", "configuration_sha256")}
-            response = self.client.complete(messages(self.work, resources, profile, media), context)
+            builder = PromptBuilder(PromptBundle(**config["prompts"]))
+            response = self.client.complete(builder.review(self.work, resources, profile, media), context)
             result["model_call"] = {k: v for k, v in response.items() if k != "data"}
             stage = "quality"
-            quality = self.client.complete(quality_messages(self.work, media),
+            quality = self.client.complete(builder.quality(self.work, media),
                                            {**context, "stage": stage}, quality_only=True)
             result["quality_call"] = {k: v for k, v in quality.items() if k != "data"}
             if set(quality["data"]) != {"quality_by_camera"}:

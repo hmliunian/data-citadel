@@ -5,9 +5,9 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
-from .data import file_hash, read
+from .infrastructure.files import file_hash, read
 from .service import BusyError, GateError, Service
-from .sensors import read_gripper
+from .infrastructure.mcap.sensors import read_gripper
 
 
 class ReviewRequest(BaseModel):

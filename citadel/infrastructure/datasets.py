@@ -1,39 +1,12 @@
-"""Source inventory, immutable experiment split and small JSON helpers."""
-from __future__ import annotations
-
-import hashlib
-import json
+"""Read-only source inventory and reproducible experiment manifests."""
 import re
 from collections import defaultdict
-from datetime import datetime, timezone
 from pathlib import Path
+
+from .files import file_hash, fingerprint, now, read, write
 
 ID = re.compile(r"[0-9a-f]{32}")
 TASK = re.compile(r"DL-[A-Z0-9]+")
-
-
-def read(path: Path):
-    return json.loads(path.read_text(encoding="utf-8"))
-
-
-def write(path: Path, value):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("x", encoding="utf-8") as out:
-        json.dump(value, out, ensure_ascii=False, indent=2)
-        out.write("\n")
-
-
-def fingerprint(value):
-    return hashlib.sha256(json.dumps(value, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
-
-
-def file_hash(path: Path):
-    with path.open("rb") as stream:
-        return hashlib.file_digest(stream, "sha256").hexdigest()
-
-
-def now():
-    return datetime.now(timezone.utc).isoformat()
 
 
 def inventory(dataset: Path):
@@ -112,17 +85,3 @@ def load_manifest(work: Path):
     return data
 
 
-def profile_for(resources: dict, profiles: dict):
-    actions = {s["action_id"] for s in resources["steps"]}
-    matches = [(name, profile) for name, profile in profiles.items()
-               if actions and actions <= set(profile["action_ids"])
-               and (not profile.get("task_codes") or resources.get("task_code") in profile["task_codes"])]
-    if len(matches) != 1:
-        raise ValueError("Task actions need exactly one configured atomic-task profile")
-    name, profile = matches[0]
-    if not all(profile.get(k) for k in ("success", "allowed", "failures")):
-        raise ValueError("Task profile needs success, allowed variation and failure rules")
-    hold, tolerance = profile.get("hold_seconds"), profile.get("hold_tolerance_s", 0)
-    if hold is not None and not (0 <= tolerance < hold):
-        raise ValueError("Invalid hold duration/tolerance")
-    return {"name": name, **profile}

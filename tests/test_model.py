@@ -4,8 +4,14 @@ import json
 import httpx
 import pytest
 
-from citadel.data import read
-from citadel.model import CHECKS, Qwen, decide, messages, quality_messages
+from citadel.infrastructure.files import read
+from citadel.domain.models import CHECKS
+from citadel.domain.decision import decide
+from citadel.infrastructure.qwen import QwenGateway as Qwen
+from citadel.application.prompts import PromptBuilder
+
+messages = PromptBuilder().review
+quality_messages = PromptBuilder().quality
 
 
 def test_basic_grasp_and_actual_timestamps(model_case, answer):
@@ -87,7 +93,7 @@ def test_stitched_sequence_keeps_timestamps_and_safe_trace(model_case, answer):
 
 def test_retry_is_bounded_and_every_attempt_recorded(model_case, monkeypatch):
     work, resources, profile, media = model_case
-    monkeypatch.setattr("citadel.model.time.sleep", lambda _: None)
+    monkeypatch.setattr("citadel.infrastructure.qwen.time.sleep", lambda _: None)
     calls = []
     def respond(request):
         calls.append(request)

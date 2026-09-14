@@ -5,8 +5,9 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-from citadel.data import file_hash, fingerprint, prepare, write
-from citadel.model import CHECKS
+from citadel.infrastructure.files import file_hash, fingerprint, write
+from citadel.infrastructure.datasets import prepare
+from citadel.domain.models import CHECKS
 from citadel.service import Service
 
 

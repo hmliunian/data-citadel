@@ -2,8 +2,8 @@ import av
 import pytest
 from PIL import Image
 
-from citadel.flatbuffer import Schema
-from citadel.media import TOPICS, nearest, render
+from citadel.infrastructure.mcap.flatbuffer import Schema
+from citadel.infrastructure.mcap.media import TOPICS, nearest, render
 
 
 def frames(times, color):

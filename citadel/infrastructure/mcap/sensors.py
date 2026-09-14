@@ -6,7 +6,7 @@ import struct
 
 from mcap.reader import make_reader
 
-from .data import fingerprint, read, write
+from ..files import fingerprint, read, write
 from .flatbuffer import Schema
 
 TOPICS = {
