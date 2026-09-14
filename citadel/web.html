@@ -43,6 +43,7 @@ video{width:100%;background:#090d12;border-radius:8px;max-height:420px}.cameras{
 <section id="result" hidden>
 <h2 id="conclusion"></h2><p id="reason"></p><p id="comparison" class="muted"></p>
 <table><thead><tr><th>检查项</th><th>判定</th><th>证据时间</th></tr></thead><tbody id="checks"></tbody></table>
+<details id="main-audit" hidden><summary>主镜头逐帧可见性（点击定位视频）</summary><div id="main-frames" class="toolbar"></div></details>
 <h2>时序观察</h2><ol id="observations"></ol>
 <h2>证据帧</h2><div id="evidence" class="evidence"></div>
 </section>
@@ -125,11 +126,30 @@ function showResult(result){
   for(const item of result.observations||[]){
     const li=document.createElement("li");li.textContent=item.description;$("observations").append(li);
   }
+  const visibility=result.main_visibility_by_frame||{};
+  $("main-audit").hidden=!Object.keys(visibility).length;
+  $("main-audit").open=Object.values(visibility).includes("absent");
+  $("main-frames").replaceChildren();
+  const states={visible:["可见","pass"],absent:["出画","fail"],uncertain:["待确认","unknown"],no_frame:["无有效帧","muted"]};
+  for(const [id,status] of Object.entries(visibility)){
+    const frame=evidence.get(id);if(!frame)continue;
+    const button=document.createElement("button"),[label,color]=states[status];
+    button.textContent=frame.time_s.toFixed(2)+"s "+label;button.className=color;
+    button.dataset.frame=id;button.onclick=()=>$("frame-"+id)?.click();$("main-frames").append(button);
+  }
   for(const frame of result.evidence||[]){
     const figure=document.createElement("figure"),img=document.createElement("img"),caption=document.createElement("figcaption");
     img.src="/assets/"+result.episode_id+"/"+frame.path.split("/").pop();
-    img.alt=frame.time_s.toFixed(2)+"秒三路证据帧";
-    img.onclick=()=>{if(state.media){$("stitched").currentTime=frame.video_time_s||0}};
+    img.id="frame-"+frame.frame_id;img.alt=frame.time_s.toFixed(2)+"秒三路证据帧";
+    img.onclick=()=>{
+      if(!state.media)return;
+      for(const [name,item] of Object.entries(state.media.videos)){
+        const video=$(name);if(!video?.readyState)continue;
+        const time=name==="stitched"?frame.video_time_s:frame.time_s-item.start_s;
+        video.currentTime=Math.max(0,Math.min(video.duration,time||0));
+      }
+      showGripper(state.media,frame.time_s);
+    };
     caption.textContent=frame.time_s.toFixed(2)+" 秒";figure.append(img,caption);$("evidence").append(figure);
   }
 }

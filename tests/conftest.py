@@ -65,6 +65,7 @@ def answer():
         {"phase": "start", "description": "物体静置", "evidence_ids": ["V000"]},
         {"phase": "hold", "description": "夹持并持续悬空", "evidence_ids": ["V001", "V002", "V003"]},
         {"phase": "end", "description": "末态仍悬空", "evidence_ids": ["V003"]}],
+        "main_visibility_by_frame": {f"V{i:03d}": "visible" for i in range(4)},
         "checks": {key: {"state": "pass", "evidence_ids": ["V000", "V003"]} for key in CHECKS},
         "hold": {"state": "pass", "evidence_ids": ["V001", "V002", "V003"]},
         "reason": "完成基本抓取且末态悬空。"}

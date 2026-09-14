@@ -24,6 +24,8 @@ def test_basic_grasp_and_actual_timestamps(model_case, answer):
 def test_each_bad_boundary_rejects(model_case, answer, check):
     _, _, profile, media = model_case
     answer["checks"][check]["state"] = "fail"
+    if check == "main_visibility":
+        answer["main_visibility_by_frame"]["V001"] = "absent"
     result = decide(answer, media, profile)
     assert result["label"] == "incorrect" and check in result["issues"]
 
@@ -164,3 +166,53 @@ def test_gripper_extrema_are_bound_to_video_time_without_gt(model_case):
     assert len(next(p["gripper_columns"] for p in content if "gripper_columns" in p)) == 8
     assert "private-review-label" not in json.dumps(sent)
     assert "原始joint_position" in sent[0]["content"]
+
+
+def test_absent_main_frame_overrides_later_visible_summary(model_case, answer):
+    _, _, profile, media = model_case
+    answer["main_visibility_by_frame"]["V001"] = "absent"
+    result = decide(answer, media, profile)
+    assert result["label"] == "incorrect"
+    assert result["checks"]["main_visibility"] == {"state": "fail", "evidence_ids": ["V001"]}
+    assert "main_visibility" in result["issues"]
+    assert result["checks"]["retry_free"]["state"] == "pass"
+
+
+def test_visibility_requires_every_frame_and_never_invents_technical_blanks(model_case, answer):
+    _, _, profile, media = model_case
+    del answer["main_visibility_by_frame"]["V001"]
+    with pytest.raises(ValueError, match="every candidate frame"):
+        decide(answer, media, profile)
+    answer["main_visibility_by_frame"]["V001"] = "no_frame"
+    result = decide(answer, media, profile)
+    assert result["status"] == "needs_review"
+    assert result["main_visibility_by_frame"]["V001"] == "uncertain"
+
+
+def test_technical_blank_is_excluded_from_visibility_failure(model_case, answer):
+    _, _, profile, media = model_case
+    media["frames"][0]["sources"]["main"] = None
+    answer["main_visibility_by_frame"]["V000"] = "absent"
+    result = decide(answer, media, profile)
+    assert result["label"] == "correct"
+    assert result["main_visibility_by_frame"]["V000"] == "no_frame"
+
+
+def test_response_schema_requires_each_frame_and_respects_camera_presence(model_case, answer):
+    work, resources, profile, media = model_case
+    media["frames"][0]["sources"]["main"] = None
+    answer["main_visibility_by_frame"]["V000"] = "no_frame"
+    sent = []
+    def respond(request):
+        sent.append(json.loads(request.content))
+        return httpx.Response(200, json={"choices": [{
+            "finish_reason": "stop", "message": {"content": json.dumps(answer)}}]})
+    Qwen(work, api_key="secret", transport=httpx.MockTransport(respond)).complete(
+        messages(work, resources, profile, media))
+    schema = sent[0]["response_format"]["json_schema"]["schema"]
+    table = schema["properties"]["main_visibility_by_frame"]
+    assert "main_visibility_by_frame" in schema["required"]
+    assert table["required"] == ["V000", "V001", "V002", "V003"]
+    assert table["additionalProperties"] is False
+    assert table["properties"]["V000"]["enum"] == ["no_frame"]
+    assert table["properties"]["V001"]["enum"] == ["visible", "absent", "uncertain"]

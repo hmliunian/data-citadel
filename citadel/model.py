@@ -34,9 +34,11 @@ NO FRAME是相机时间对齐产生的技术空位；不能据此判物体消失
 2. scene_match：同时核对房间环境和steps中location_name/location_detail指定的执行区域。
 同一房间不代表在正确区域；指定桌面上的任意位置都可，但从书架/柜面/另一工作台操作不等于在指定桌面。
 允许不同拍摄角度与物品摆放，不能仅因角度、背景局部或桌上杂物变化就判错。
-3. main_visibility：仅在主镜头实际有效画面内检查被操作物体，其他视角不能代替主镜头可见性。
-书脊/背面仍可见不等于物体消失。主镜头起止的NO FRAME不构成失败，也不妨碍判断之后的有效画面。
-目标在关键过程明确离开主镜头画面则fail；无法确认是否仍在画面才unknown。
+3. main_visibility：按时间逐一检查整段录像中所有主镜头有效帧，覆盖接近、夹取、抬起和末态，不能只选后半段或抓取成功时的画面。
+镜头转向书架、墙面、玻璃、天花板、地面等方向，目标完全不在主镜头有效画面内，属于明确出画，必须fail。
+即使随后重新入画、腕部始终可见、夹爪持续受力或最终抓取成功，也不能抵消此前出画。相机有正常背景画面但没有目标不是NO FRAME。
+书脊/背面或可连续追踪的局部仍可见不等于物体消失；正常抖动但目标仍可见不判错。仅在确实无法确认是否仍在画面时unknown。
+只根据主镜头判断本项；技术NO FRAME不参与。pass须依据整段有效主镜头，fail应引用实际出画帧，并在observations中记录主镜头朝向和目标不可见区间。
 4. image_quality：分别检查三路实际画面的清晰度，不能用腕部清晰掩盖主镜头持续模糊。
 指纹、污渍、失焦等造成任一路关键内容持续难以分辨应fail；轻微运动模糊但仍可辨认内容可pass。
 技术NO FRAME不参与画质评判。不得把真实模糊画面描述成技术缺帧。
@@ -49,8 +51,12 @@ NO FRAME是相机时间对齐产生的技术空位；不能据此判物体消失
 正常相机启停时间差不能直接判动作不完整；需结合三路有效画面确认是否缺失必要过程。
 若要求hold_seconds，必须确认持续受控悬空约该时长并核对最终仍悬空；中途抓起、最后放回不能通过。
 未看见成功不自动证明失败；只有可见反证才fail。真实证据不足用unknown，不编造遗漏的接触或失败细节。
-返回一个JSON对象，顶层必须恰好有四个字段：observations、checks、hold、reason。
+返回一个JSON对象，顶层必须恰好有五个字段：observations、main_visibility_by_frame、checks、hold、reason。
 hold与checks同级，绝不能嵌入checks；checks内部恰好是下面七项。
+main_visibility_by_frame：逐帧列出所有candidate_frame ID，值仅用visible（目标或可追踪局部可见）、absent（完全出画）、
+uncertain（无法确认）或no_frame（元数据说明主镜头无有效帧）。只看拼接左格，不能借用腕部画面；不可遗漏前段或中间帧。
+此表与物体身份判断独立：看见被操作物体但看不清书名仍可visible。正常晃动但目标仍在画内可visible。
+程序会核对帧覆盖并汇总可见性；任何有效主镜头帧为absent都会判不通过。相机实际有背景画面时不可填no_frame。
 observations：按时间记录可见事实，列表元素为{phase,description,evidence_ids}。
 描述候选外观/操作区域、夹具与物体状态、每次明确失败及末态。可将相同状态的相邻帧合并，引用对应ID。
 phase仅用start、action、hold、release、failure、end、uncertain；failure仅用于明确动作失败/失控。
@@ -90,6 +96,7 @@ class Observation(BaseModel):
 class Review(BaseModel):
     model_config = ConfigDict(extra="forbid")
     observations: list[Observation] = Field(min_length=1)
+    main_visibility_by_frame: dict[str, Literal["visible", "absent", "uncertain", "no_frame"]]
     checks: dict[str, Check]
     hold: Check | None
     reason: str = Field(min_length=1)
@@ -159,12 +166,18 @@ class Qwen:
             key = path.read_text().strip()
         if not key or any(c.isspace() for c in key):
             raise ValueError("Qwen key must be a single nonempty token")
-        count = 0
+        count, frame_states = 0, {}
         for message in request_messages:
             if isinstance(message["content"], list):
                 for part in message["content"]:
                     if part["type"] == "image_url":
                         count += 1
+                    elif part["type"] == "text":
+                        frame = json.loads(part["text"]).get("candidate_frame")
+                        if frame:
+                            frame_states[frame["frame_id"]] = (
+                                ["visible", "absent", "uncertain"]
+                                if frame["source_times_s"].get("main") is not None else ["no_frame"])
         if count > 250:
             raise ValueError("Total image input exceeds this workflow's 250-image limit")
         payload = {"model": self.model, "messages": request_messages, "temperature": 0,
@@ -176,6 +189,11 @@ class Qwen:
             schema["properties"]["checks"].update(
                 properties={name: {"$ref": "#/$defs/Check"} for name in CHECKS},
                 required=list(CHECKS), additionalProperties=False)
+            schema["properties"]["main_visibility_by_frame"] = {
+                "type": "object", "properties": {
+                    frame_id: {"type": "string", "enum": states}
+                    for frame_id, states in frame_states.items()},
+                "required": list(frame_states), "additionalProperties": False}
             payload["response_format"] = {"type": "json_schema", "json_schema": {
                 "name": "atomic_task_review", "strict": True, "schema": schema}}
         with httpx.Client(timeout=httpx.Timeout(180, connect=15), transport=self.transport) as client:
@@ -222,19 +240,36 @@ def decide(data, media, profile):
     if set(parsed.checks) != set(CHECKS):
         raise ValueError("Model must return all seven checks")
     lookup = {f["frame_id"]: f for f in media["frames"]}
-    used = set()
+    frame_visibility = parsed.main_visibility_by_frame
+    if set(frame_visibility) != set(lookup):
+        raise ValueError("Visibility must cover every candidate frame")
+    used = set(lookup)
     for item in [*parsed.observations, *parsed.checks.values(), *([parsed.hold] if parsed.hold else [])]:
         ids = item.evidence_ids
         if (len(set(ids)) != len(ids) or any(i not in lookup for i in ids)
                 or isinstance(item, Check) and item.state != "unknown" and not ids):
             raise ValueError("Evidence must reference supplied candidate frames")
-        used.update(ids)
     warnings = list(media["warnings"])
     visibility = parsed.checks["main_visibility"]
     if visibility.state != "unknown" and not any(
             lookup[i]["sources"].get("main") for i in visibility.evidence_ids):
         visibility.state = "unknown"
         warnings.append("main_visibility:no_valid_main_evidence")
+    valid_main = [i for i, frame in lookup.items() if frame["sources"].get("main")]
+    for frame_id in lookup:
+        if frame_id not in valid_main:
+            frame_visibility[frame_id] = "no_frame"
+        elif frame_visibility[frame_id] == "no_frame":
+            frame_visibility[frame_id] = "uncertain"
+            warnings.append(frame_id + ":main_camera_is_present")
+    absent = [i for i in valid_main if frame_visibility[i] == "absent"]
+    unclear = [i for i in valid_main if frame_visibility[i] == "uncertain"]
+    if absent:
+        visibility.state, visibility.evidence_ids = "fail", absent
+    elif unclear or not valid_main or visibility.state != "pass":
+        visibility.state, visibility.evidence_ids = "unknown", unclear or valid_main
+    else:
+        visibility.evidence_ids = valid_main
     issues = [key for key, check in parsed.checks.items() if check.state == "fail"]
     if any(o.phase == "failure" for o in parsed.observations):
         issues.append("observed_failure")
@@ -255,13 +290,14 @@ def decide(data, media, profile):
             uncertain |= hold_span < profile["hold_seconds"] - profile.get("hold_tolerance_s", 0)
             uncertain |= max(times) < media["frames"][-1]["time_s"] - media["signature"].get("tolerance_s", 0.1)
     label = "incorrect" if issues else (None if uncertain else "correct")
-    reason = parsed.reason
+    reason = ("主镜头目标出画；" if absent else "") + parsed.reason
     if label is None:
         reason += "；时间、首尾或采集证据仍不足，需复核。"
     if "observed_failure" in issues:
         reason = "过程包含明确失败；" + reason
     return {"status": "needs_review" if label is None else "completed", "label": label,
             "reason": reason, "issues": issues, "checks": {k: v.model_dump() for k, v in parsed.checks.items()},
+            "main_visibility_by_frame": frame_visibility,
             "observations": [o.model_dump() for o in parsed.observations],
             "hold": parsed.hold.model_dump() if parsed.hold else None,
             "hold_evidence_span_s": hold_span, "evidence": [lookup[i] for i in sorted(used)],
