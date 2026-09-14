@@ -18,7 +18,7 @@ UMI-T 独立原子任务测试窗口与 FastAPI。当前配置为抓取；代码
 
 ```bash
 cd /home/xuran/projects/data_review/data_citadel
-.venv/bin/python -m citadel --work-dir artifacts/gripper_v1 serve
+.venv/bin/python -m citadel --work-dir artifacts/visibility_v1 serve
 ```
 
 窗口：`http://127.0.0.1:8766/`；接口文档：`/docs`。筛选支持误放、误拒和待复核，冻结后同时展示开发集与留出集。
