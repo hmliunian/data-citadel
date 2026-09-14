@@ -102,3 +102,36 @@ def test_truncated_model_output_is_execution_error(model_case):
         lambda _: httpx.Response(200, json={"choices": [{"finish_reason": "length"}]})))
     with pytest.raises(ValueError, match="incomplete"):
         client.complete(messages(work, resources, profile, media))
+
+
+def test_empty_main_panel_cannot_prove_visibility_failure(model_case, answer):
+    _, _, profile, media = model_case
+    media["frames"][0]["sources"]["main"] = None
+    answer["checks"]["main_visibility"] = {"state": "fail", "evidence_ids": ["V000"]}
+    result = decide(answer, media, profile)
+    assert result["label"] is None and result["status"] == "needs_review"
+    assert result["checks"]["main_visibility"]["state"] == "unknown"
+
+
+def test_mid_video_hold_does_not_prove_final_airborne_state(model_case, answer):
+    _, _, profile, media = model_case
+    answer["hold"]["evidence_ids"] = ["V000", "V001", "V002"]
+    assert decide(answer, media, profile)["status"] == "needs_review"
+
+
+def test_supported_new_qwen_runs_without_hidden_thinking(model_case, answer):
+    work, resources, profile, media = model_case
+    seen = []
+    def respond(request):
+        payload = json.loads(request.content)
+        seen.append(payload)
+        return httpx.Response(200, json={"choices": [{
+            "finish_reason": "stop", "message": {"content": json.dumps(answer)}}]})
+    client = Qwen(work, model="qwen3.5-plus-2026-02-15", api_key="secret",
+                  transport=httpx.MockTransport(respond))
+    result = client.complete(messages(work, resources, profile, media))
+    assert seen[0]["enable_thinking"] is False
+    trace = read(work / result["call_path"] / "request.json")
+    assert trace["parameters"]["enable_thinking"] is False
+    context = json.loads(seen[0]["messages"][1]["content"][0]["text"])
+    assert context["camera_ranges"]["main"] == {"first_frame_id": "V000", "last_frame_id": "V003"}
