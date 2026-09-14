@@ -24,6 +24,8 @@ def test_basic_grasp_and_actual_timestamps(model_case, answer):
 def test_each_bad_boundary_rejects(model_case, answer, check):
     _, _, profile, media = model_case
     answer["checks"][check]["state"] = "fail"
+    if check == "image_quality":
+        answer["quality_by_camera"]["main"]["state"] = "fail"
     if check == "main_visibility":
         answer["main_visibility_by_frame"]["V001"] = "absent"
     result = decide(answer, media, profile)
@@ -210,9 +212,53 @@ def test_response_schema_requires_each_frame_and_respects_camera_presence(model_
     Qwen(work, api_key="secret", transport=httpx.MockTransport(respond)).complete(
         messages(work, resources, profile, media))
     schema = sent[0]["response_format"]["json_schema"]["schema"]
+    quality = schema["properties"]["quality_by_camera"]
+    assert "quality_by_camera" in schema["required"]
+    assert set(quality["required"]) == {"main", "left_wrist", "right_wrist"}
+    assert quality["additionalProperties"] is False
     table = schema["properties"]["main_visibility_by_frame"]
     assert "main_visibility_by_frame" in schema["required"]
     assert table["required"] == ["V000", "V001", "V002", "V003"]
     assert table["additionalProperties"] is False
     assert table["properties"]["V000"]["enum"] == ["no_frame"]
     assert table["properties"]["V001"]["enum"] == ["visible", "absent", "uncertain"]
+
+
+@pytest.mark.parametrize("camera", ["main", "left_wrist", "right_wrist"])
+def test_one_blurred_camera_rejects_despite_clear_other_views(model_case, answer, camera):
+    _, _, profile, media = model_case
+    answer["quality_by_camera"][camera].update(
+        state="fail", evidence_ids=["V001", "V003"], description="持续发虚，轮廓尚可见")
+    result = decide(answer, media, profile)
+    assert result["label"] == "incorrect"
+    assert result["checks"]["image_quality"] == {"state": "fail", "evidence_ids": ["V001", "V003"]}
+    assert result["checks"]["action"]["state"] == "pass"
+    assert result["checks"]["main_visibility"]["state"] == "pass"
+
+
+def test_missing_camera_quality_or_unknown_evidence_cannot_pass(model_case, answer):
+    _, _, profile, media = model_case
+    del answer["quality_by_camera"]["main"]
+    with pytest.raises(ValueError, match="all three cameras"):
+        decide(answer, media, profile)
+    answer["quality_by_camera"]["main"] = {
+        "state": "unknown", "evidence_ids": [], "description": "画质证据不足"}
+    assert decide(answer, media, profile)["status"] == "needs_review"
+    answer["quality_by_camera"]["main"].update(state="fail", evidence_ids=["V999"])
+    with pytest.raises(ValueError, match="Evidence"):
+        decide(answer, media, profile)
+
+
+def test_quality_ignores_technical_blank_evidence(model_case, answer):
+    _, _, profile, media = model_case
+    media["frames"][0]["sources"]["main"] = None
+    answer["quality_by_camera"]["main"].update(state="fail", evidence_ids=["V000"])
+    result = decide(answer, media, profile)
+    assert result["status"] == "needs_review"
+    assert result["checks"]["image_quality"]["state"] == "unknown"
+    assert result["quality_by_camera"]["main"]["evidence_ids"] == []
+
+def test_conflicting_quality_summary_needs_review(model_case, answer):
+    _, _, profile, media = model_case
+    answer["checks"]["image_quality"]["state"] = "fail"
+    assert decide(answer, media, profile)["status"] == "needs_review"

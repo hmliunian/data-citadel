@@ -14,6 +14,7 @@ import httpx
 from pydantic import BaseModel, ConfigDict, Field
 
 from .data import fingerprint, write
+from .media import TOPICS as CAMERAS
 from .resources import image_input
 from .sensors import TOPICS as GRIPPER_CHANNELS, intervals
 
@@ -24,7 +25,7 @@ PROMPT = """你审核一条原子任务采集记录。输入是当前任务指�
 拼接从左到右为主镜头、左腕、右腕。每1秒采样并保留首尾；每个candidate_frame说明紧邻其图像。
 时间以candidate_frame.time_s为准，不能按帧数计时。camera_ranges标出每路实际有画面的范围。
 NO FRAME是相机时间对齐产生的技术空位；不能据此判物体消失、画面模糊或动作失败。
-先观察实际被操作的物体，再对照资源，最后判断动作。不要把任务给定的名字直接当成候选识别结果。
+先逐路观察原始画质，再观察实际被操作物体、对照资源和判断动作。不要把任务给定的名字直接当成候选识别结果。
 身份尚不确定，不代表没有完成抓起；物体身份、动作能力、执行区域须独立判断。
 分项标准：
 1. object_match：比较参考图与实际被操作物体的类别、可读文字、图案和结构，跨帧跨视角追踪。
@@ -39,9 +40,11 @@ NO FRAME是相机时间对齐产生的技术空位；不能据此判物体消失
 即使随后重新入画、腕部始终可见、夹爪持续受力或最终抓取成功，也不能抵消此前出画。相机有正常背景画面但没有目标不是NO FRAME。
 书脊/背面或可连续追踪的局部仍可见不等于物体消失；正常抖动但目标仍可见不判错。仅在确实无法确认是否仍在画面时unknown。
 只根据主镜头判断本项；技术NO FRAME不参与。pass须依据整段有效主镜头，fail应引用实际出画帧，并在observations中记录主镜头朝向和目标不可见区间。
-4. image_quality：分别检查三路实际画面的清晰度，不能用腕部清晰掩盖主镜头持续模糊。
-指纹、污渍、失焦等造成任一路关键内容持续难以分辨应fail；轻微运动模糊但仍可辨认内容可pass。
-技术NO FRAME不参与画质评判。不得把真实模糊画面描述成技术缺帧。
+4. image_quality：独立检查主镜头、左腕、右腕各自的实际画质；物体可见、动作成功或另一路清晰都不能证明本路画质合格。
+跨多个时刻，操作区域的物体、夹具及桌面边缘持续发虚、雾化、重影或细节涂抹，即使仍能看见大致轮廓或猜出物品类别，也应fail。
+结合动作较慢或保持阶段检查：这些时刻仍持续模糊，不能解释为正常晃动。在observations中写出受影响的相机、可见模糊特征及对应帧，image_quality引用这些帧。
+短暂运动模糊后恢复清晰、远处背景虚化、仅小字因距离或分辨率不可读，不单独判失败；不要求主镜头读清书名。
+技术NO FRAME不参与画质评判。只评价原始相机画面，叠加时间文字的清晰度不作依据；真实模糊不等于技术缺帧。
 5. action：依据task_rules评估实际动作。抓取只需基本夹持与抬离支撑面的能力。
 结合与桌面的相对高度、空隙、运动和多视角判断；仍处于桌面上方不等于仍被桌面支撑。
 不限定抓取位置、路径、角度、速度、用手，不要求始终看到接触点。允许正常抖动、调整、换手。
@@ -51,8 +54,12 @@ NO FRAME是相机时间对齐产生的技术空位；不能据此判物体消失
 正常相机启停时间差不能直接判动作不完整；需结合三路有效画面确认是否缺失必要过程。
 若要求hold_seconds，必须确认持续受控悬空约该时长并核对最终仍悬空；中途抓起、最后放回不能通过。
 未看见成功不自动证明失败；只有可见反证才fail。真实证据不足用unknown，不编造遗漏的接触或失败细节。
-返回一个JSON对象，顶层必须恰好有五个字段：observations、main_visibility_by_frame、checks、hold、reason。
+返回一个JSON对象，顶层必须恰好有六个字段：quality_by_camera、observations、main_visibility_by_frame、checks、hold、reason。
 hold与checks同级，绝不能嵌入checks；checks内部恰好是下面七项。
+quality_by_camera：首先分别填写main、left_wrist、right_wrist三项，每项为{state,evidence_ids,description}。
+state仅用pass、fail、unknown；description说明本路原始画面的清晰或模糊特征，不能只说明看到了物体或抓取成功。
+例如“主镜头持续发虚但大致轮廓可见、腕部清晰”，应为main=fail、对应腕部=pass；不能把三路总体可理解写成三路画质都pass。
+每路引用本路实际有效的候选帧；没有有效画面或无法确认时unknown。image_quality由这三项汇总：任一路fail则fail，全部pass才pass，否则unknown。
 main_visibility_by_frame：逐帧列出所有candidate_frame ID，值仅用visible（目标或可追踪局部可见）、absent（完全出画）、
 uncertain（无法确认）或no_frame（元数据说明主镜头无有效帧）。只看拼接左格，不能借用腕部画面；不可遗漏前段或中间帧。
 此表与物体身份判断独立：看见被操作物体但看不清书名仍可visible。正常晃动但目标仍在画内可visible。
@@ -86,6 +93,10 @@ class Check(BaseModel):
     evidence_ids: list[str]
 
 
+class CameraQuality(Check):
+    description: str = Field(min_length=1)
+
+
 class Observation(BaseModel):
     model_config = ConfigDict(extra="forbid")
     phase: Literal["start", "action", "hold", "release", "failure", "end", "uncertain"]
@@ -95,6 +106,7 @@ class Observation(BaseModel):
 
 class Review(BaseModel):
     model_config = ConfigDict(extra="forbid")
+    quality_by_camera: dict[str, CameraQuality]
     observations: list[Observation] = Field(min_length=1)
     main_visibility_by_frame: dict[str, Literal["visible", "absent", "uncertain", "no_frame"]]
     checks: dict[str, Check]
@@ -194,6 +206,9 @@ class Qwen:
                     frame_id: {"type": "string", "enum": states}
                     for frame_id, states in frame_states.items()},
                 "required": list(frame_states), "additionalProperties": False}
+            schema["properties"]["quality_by_camera"].update(
+                properties={name: {"$ref": "#/$defs/CameraQuality"} for name in CAMERAS},
+                required=list(CAMERAS), additionalProperties=False)
             payload["response_format"] = {"type": "json_schema", "json_schema": {
                 "name": "atomic_task_review", "strict": True, "schema": schema}}
         with httpx.Client(timeout=httpx.Timeout(180, connect=15), transport=self.transport) as client:
@@ -239,12 +254,15 @@ def decide(data, media, profile):
     parsed = Review.model_validate(data)
     if set(parsed.checks) != set(CHECKS):
         raise ValueError("Model must return all seven checks")
+    if set(parsed.quality_by_camera) != set(CAMERAS):
+        raise ValueError("Quality must cover all three cameras")
     lookup = {f["frame_id"]: f for f in media["frames"]}
     frame_visibility = parsed.main_visibility_by_frame
     if set(frame_visibility) != set(lookup):
         raise ValueError("Visibility must cover every candidate frame")
     used = set(lookup)
-    for item in [*parsed.observations, *parsed.checks.values(), *([parsed.hold] if parsed.hold else [])]:
+    for item in [*parsed.observations, *parsed.checks.values(), *parsed.quality_by_camera.values(),
+                 *([parsed.hold] if parsed.hold else [])]:
         ids = item.evidence_ids
         if (len(set(ids)) != len(ids) or any(i not in lookup for i in ids)
                 or isinstance(item, Check) and item.state != "unknown" and not ids):
@@ -270,6 +288,19 @@ def decide(data, media, profile):
         visibility.state, visibility.evidence_ids = "unknown", unclear or valid_main
     else:
         visibility.evidence_ids = valid_main
+    for view, quality in parsed.quality_by_camera.items():
+        quality.evidence_ids = [i for i in quality.evidence_ids if lookup[i]["sources"].get(view)]
+        if quality.state != "unknown" and not quality.evidence_ids:
+            quality.state = "unknown"
+            warnings.append(view + ":no_valid_quality_evidence")
+    qualities = list(parsed.quality_by_camera.values())
+    bad_quality = [q for q in qualities if q.state == "fail"]
+    quality_state = "fail" if bad_quality else (
+        "unknown" if any(q.state == "unknown" for q in qualities) else "pass")
+    if quality_state == "pass" and parsed.checks["image_quality"].state != "pass":
+        quality_state = "unknown"
+    parsed.checks["image_quality"] = Check(state=quality_state, evidence_ids=sorted({
+        i for q in (bad_quality or qualities) for i in q.evidence_ids}))
     issues = [key for key, check in parsed.checks.items() if check.state == "fail"]
     if any(o.phase == "failure" for o in parsed.observations):
         issues.append("observed_failure")
@@ -298,6 +329,7 @@ def decide(data, media, profile):
     return {"status": "needs_review" if label is None else "completed", "label": label,
             "reason": reason, "issues": issues, "checks": {k: v.model_dump() for k, v in parsed.checks.items()},
             "main_visibility_by_frame": frame_visibility,
+            "quality_by_camera": {k: v.model_dump() for k, v in parsed.quality_by_camera.items()},
             "observations": [o.model_dump() for o in parsed.observations],
             "hold": parsed.hold.model_dump() if parsed.hold else None,
             "hold_evidence_span_s": hold_span, "evidence": [lookup[i] for i in sorted(used)],

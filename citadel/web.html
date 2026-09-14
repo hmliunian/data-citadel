@@ -42,7 +42,7 @@ video{width:100%;background:#090d12;border-radius:8px;max-height:420px}.cameras{
 <canvas id="gripper" width="1200" height="370" style="width:100%;cursor:crosshair" aria-label="夹爪位置和指尖受力曲线"></canvas></section>
 <section id="result" hidden>
 <h2 id="conclusion"></h2><p id="reason"></p><p id="comparison" class="muted"></p>
-<table><thead><tr><th>检查项</th><th>判定</th><th>证据时间</th></tr></thead><tbody id="checks"></tbody></table>
+<table><thead><tr><th>检查项</th><th>判定</th><th>证据时间 / 画质说明</th></tr></thead><tbody id="checks"></tbody></table>
 <details id="main-audit" hidden><summary>主镜头逐帧可见性（模型判定，点击定位视频）</summary><div id="main-frames" class="toolbar"></div></details>
 <h2>时序观察</h2><ol id="observations"></ol>
 <h2>证据帧</h2><div id="evidence" class="evidence"></div>
@@ -116,9 +116,10 @@ function showResult(result){
   $("review").textContent=result.status==="failed"?"重试失败任务":"查看已有结果";
   $("checks").replaceChildren();$("observations").replaceChildren();$("evidence").replaceChildren();
   const evidence=new Map((result.evidence||[]).map(frame=>[frame.frame_id,frame]));
-  for(const [name,check] of Object.entries({...result.checks,...(result.hold?{hold:result.hold}:{})})){
+  const cameraNames={main:"主镜头画质",left_wrist:"左腕画质",right_wrist:"右腕画质"};
+  for(const [name,check] of Object.entries({...result.checks,...result.quality_by_camera,...(result.hold?{hold:result.hold}:{})})){
     const row=document.createElement("tr");
-    for(const value of [names[name]||name,labels[check.state],check.evidence_ids.map(id=>evidence.get(id)?.time_s.toFixed(2)+"s").join("、")]){
+    for(const value of [cameraNames[name]||names[name]||name,labels[check.state],check.evidence_ids.map(id=>evidence.get(id)?.time_s.toFixed(2)+"s").join("、")+(check.description?" · "+check.description:"")]){
       const cell=document.createElement("td");cell.textContent=value;row.append(cell);
     }
     row.children[1].className=check.state;$("checks").append(row);
