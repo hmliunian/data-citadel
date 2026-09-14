@@ -17,7 +17,11 @@ cd /home/xuran/projects/data_review/data_citadel
 .venv/bin/python -m citadel --work-dir artifacts/final_evaluation serve
 ```
 
-窗口：`http://127.0.0.1:8766/`；接口文档：`/docs`。远程访问可通过 SSH 转发：
+窗口：`http://127.0.0.1:8766/`；接口文档：`/docs`。筛选支持误放、误拒和待复核，冻结后同时展示开发集与留出集。
+主镜头、左腕和右腕均提供从 MCAP 导出的完整 MP4，可播放或下载；拼接视频为每 1 秒采样的模型视图。
+用 `/?filter=errors` 查看全部错例，追加 `&episode=记录ID` 可直达单条记录，并对照 GT 原因与模型结论。
+
+远程访问可通过 SSH 转发：
 
 ```bash
 ssh -N -L 8766:127.0.0.1:8766 xuran-5090-7f
