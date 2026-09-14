@@ -14,7 +14,7 @@ UMI-T 独立原子任务测试窗口与 FastAPI。当前配置为抓取；代码
 
 ```bash
 cd /home/xuran/projects/data_review/data_citadel
-.venv/bin/python -m citadel --work-dir artifacts/grasp_v1 serve
+.venv/bin/python -m citadel --work-dir artifacts/final_evaluation serve
 ```
 
 窗口：`http://127.0.0.1:8766/`；接口文档：`/docs`。远程访问可通过 SSH 转发：
@@ -33,6 +33,7 @@ ssh -N -L 8766:127.0.0.1:8766 xuran-5090-7f
 .venv/bin/python -m citadel --work-dir artifacts/new_run serve
 ```
 
+当前默认模型为 `qwen3.8-max-0902`，非思考模式；模型与 prompt 的实测取舍见 [VALIDATION.md](VALIDATION.md)。
 Qwen 凭据从 `QWEN_API_KEY` / `DASHSCOPE_API_KEY` 或 `Qwen-api/qwen_api_key.txt` 读取。
 `QWEN_MODEL`、`QWEN_BASE_URL`、`QWEN_API_KEY_FILE` 可覆盖默认值；凭据不入 Git。
 修改代码、规则或模型设置后重启服务；已有结果按配置区分。
