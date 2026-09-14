@@ -115,7 +115,8 @@ def load_manifest(work: Path):
 def profile_for(resources: dict, profiles: dict):
     actions = {s["action_id"] for s in resources["steps"]}
     matches = [(name, profile) for name, profile in profiles.items()
-               if actions and actions <= set(profile["action_ids"])]
+               if actions and actions <= set(profile["action_ids"])
+               and (not profile.get("task_codes") or resources.get("task_code") in profile["task_codes"])]
     if len(matches) != 1:
         raise ValueError("Task actions need exactly one configured atomic-task profile")
     name, profile = matches[0]

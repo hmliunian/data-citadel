@@ -28,7 +28,8 @@ PROMPT = """你审核一条原子任务采集记录。输入含任务指令、�
 不要求始终看见接触点，也不能因物体仍在桌面投影范围内就认定它仍受桌面支撑。
 没有观察到成功并不自动证明失败：fail必须有实际可见的反证，看不清或采样没覆盖用unknown。
 拼接从左到右为主镜头、左腕、右腕。每1秒采样并加首尾点，完整序列属于同一条记录。
-相邻帧并非总间隔1秒：按标注与timeline的真实时间判断，不能根据fps或帧数推算悬空时长。
+每个candidate_frame说明紧邻它的拼接图；这是同一条录像的完整有序序列，不是多条独立样本。
+相邻帧并非总间隔1秒：按candidate_frame的真实时间判断，不能根据帧数推算悬空时长。
 NO FRAME是技术缺帧，不等于物体消失；三路可互相补充，但主镜头可见性需独立核对。
 先按时间记录可见事实，再给分项判定。关注开始、抓起/任务动作、物体控制、失败尝试和末态。
 没有采到的接触细节不编造；只要证据能确认基本动作能力，不要求特定位置、路径、手或姿态。
@@ -43,7 +44,7 @@ checks: object_match、scene_match、main_visibility、image_quality、action、
 每项为{state:"pass|fail|unknown",evidence_ids:["V000"]}。
 hold: 若任务有hold_seconds，给出相同结构，并引用持续受控悬空的起止及中间证据；否则为null。
 reason: 简短中文理由。
-只引用timeline里的实际候选ID，不引用资源图，不生成新ID。pass/fail必须有证据，unknown可为空。
+只引用candidate_frame里的实际候选ID，不引用资源图，不生成新ID。pass/fail必须有证据，unknown可为空。
 证据不足用unknown，禁止把未知当成错误或正确。不输出总体标签，总体结论由程序汇总。
 """
 
@@ -76,7 +77,7 @@ def messages(work: Path, resources: dict, profile: dict, media: dict):
     content = [{"type": "text", "text": json.dumps({
         "instruction": resources["steps"], "task_rules": profile,
         "first_frame_id": timeline[0]["frame_id"], "last_frame_id": timeline[-1]["frame_id"],
-        "timeline": timeline, "media_warnings": media["warnings"],
+        "frame_count": len(timeline), "media_warnings": media["warnings"],
     }, ensure_ascii=False)}]
     for item in resources["images"]:
         content.extend([
@@ -84,8 +85,10 @@ def messages(work: Path, resources: dict, profile: dict, media: dict):
                 {"reference_type": item["type"], "name": item["name"], "id": item["id"]},
                 ensure_ascii=False)},
             {"type": "image_url", "image_url": {"url": image_input(work, item)}}])
-    content.append({"type": "video", "video": [image_input(work, f) for f in media["frames"]],
-                    "fps": 1 / media["signature"]["interval_s"], "max_pixels": 786432})
+    for frame, timing in zip(media["frames"], timeline):
+        content.extend([
+            {"type": "text", "text": json.dumps({"candidate_frame": timing}, ensure_ascii=False)},
+            {"type": "image_url", "image_url": {"url": image_input(work, frame)}}])
     return [{"role": "system", "content": PROMPT}, {"role": "user", "content": content}]
 
 
@@ -98,8 +101,6 @@ def safe_messages(value):
             for part in message["content"]:
                 if part["type"] == "image_url":
                     part["image_url"] = hidden(part["image_url"]["url"])
-                elif part["type"] == "video":
-                    part["video"] = [hidden(url) for url in part["video"]]
     return clean
 
 
@@ -124,10 +125,6 @@ class Qwen:
                 for part in message["content"]:
                     if part["type"] == "image_url":
                         count += 1
-                    elif part["type"] == "video":
-                        if not 4 <= len(part["video"]) <= 250:
-                            raise ValueError("Video input requires 4 to 250 prepared frames")
-                        count += len(part["video"])
         if count > 250:
             raise ValueError("Total image input exceeds this workflow's 250-image limit")
         payload = {"model": self.model, "messages": request_messages, "temperature": 0,

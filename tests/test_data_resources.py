@@ -89,3 +89,17 @@ def test_source_gt_is_retained_without_expert_requirement(dataset, tmp_path):
     assert len(manifest["episodes"]) == 8
     assert {r["gt"] for r in manifest["episodes"].values()} == {"correct", "incorrect"}
     assert read(tmp_path / "run/manifest.json")["sampling"]["interval_s"] == 1
+
+
+def test_task_local_action_ids_cannot_select_another_task():
+    from citadel.data import profile_for
+    common = {"action_ids": ["A_001"], "allowed": "自由路径", "failures": ["未完成"]}
+    profiles = {
+        "grasp": {**common, "task_codes": ["DL-GRASP"], "success": "抓起"},
+        "wipe": {**common, "task_codes": ["DL-WIPE"], "success": "擦拭"},
+    }
+    refs = {"task_code": "DL-WIPE", "steps": [{"action_id": "A_001"}]}
+    assert profile_for(refs, profiles)["name"] == "wipe"
+    refs["task_code"] = "DL-UNKNOWN"
+    with pytest.raises(ValueError, match="exactly one"):
+        profile_for(refs, profiles)

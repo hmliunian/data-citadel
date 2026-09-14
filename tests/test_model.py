@@ -60,7 +60,7 @@ def test_other_atomic_task_does_not_require_hold(model_case, answer):
     assert decide(answer, media, {"success": "擦拭指定区域"})["label"] == "correct"
 
 
-def test_qwen_native_video_and_safe_trace(model_case, answer):
+def test_stitched_sequence_keeps_timestamps_and_safe_trace(model_case, answer):
     work, resources, profile, media = model_case
     sent = []
     def respond(request):
@@ -72,9 +72,10 @@ def test_qwen_native_video_and_safe_trace(model_case, answer):
     client = Qwen(work, api_key="test-private-secret", transport=httpx.MockTransport(respond))
     result = client.complete(messages(work, resources, profile, media), {"episode_id": "candidate"})
     parts = sent[0]["messages"][1]["content"]
-    assert parts[-1]["type"] == "video" and len(parts[-1]["video"]) == 4
-    assert parts[-1]["fps"] == 1.0
-    assert "V003" in parts[0]["text"] and "source_times_s" in parts[0]["text"]
+    assert [p["type"] for p in parts[-8:]] == ["text", "image_url"] * 4
+    timing = json.loads(parts[-2]["text"])["candidate_frame"]
+    assert timing["frame_id"] == "V003" and timing["time_s"] == 3.0
+    assert timing["source_times_s"]["main"] == 3.0
     assert result["data"] == answer and result["usage"]["total_tokens"] == 150
     trace = (work / result["call_path"] / "request.json").read_text()
     assert "test-private-secret" not in trace and "base64," not in trace
