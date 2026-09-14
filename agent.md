@@ -24,15 +24,16 @@
 
 **数据与任务资源**
 
-- 数据：`/home/xuran/xuran_projects/data_review/datasets`。
+- 当前核验数据：`/home/xuran/projects/data_review/datasets/DL-NA52UU`，共 98 条（20 正例、78 坏例）。
 - Qwen 凭据：环境变量或项目内 `Qwen-api/qwen_api_key.txt`。
 - 按实际 `task_code` 获取资源：
   `http://172.100.11.189:8001/api/collection_tasks/code/{task_code}/resources`
 - 读取 `steps` 中的 `action_id/action_text`，以及 `images` 中 `type=object/scene` 的 ID、名称和图片。图片 URL 使用接口实时返回值。
 - `DL-SOHFAI`（黄抹布擦茶几柜）仅是接口示例，不是抓取任务的固定配置。
 
-**验证中需确定**
+**当前实现与待校准项**
 
-1. Qwen 输入形式、prompt 结构和输出字段。
-2. 悬空约 2 秒的时间容差，以及遮挡、模糊和证据不足的判定边界。
-3. GT 验证划分，以及新增原子任务需要提供的配置。
+- 三路拼接帧逐帧绑定真实时间，整段一次输入；输出分项结论、过程观察和时间证据。
+- 固定开发集 68 条、留出集 30 条；新增任务通过 `config/tasks.json` 配置。
+- 悬空默认 2 秒、时间容差暂设 0.2 秒；证据不足待复核，仍需 GT 校准。
+- 真实正例与物体参考图的对应关系正在核对；不根据 GT 标签直接放宽身份要求。
