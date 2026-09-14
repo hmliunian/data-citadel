@@ -5,7 +5,7 @@ import httpx
 import pytest
 
 from citadel.data import read
-from citadel.model import CHECKS, Qwen, decide, messages
+from citadel.model import CHECKS, Qwen, decide, messages, quality_messages
 
 
 def test_basic_grasp_and_actual_timestamps(model_case, answer):
@@ -212,10 +212,7 @@ def test_response_schema_requires_each_frame_and_respects_camera_presence(model_
     Qwen(work, api_key="secret", transport=httpx.MockTransport(respond)).complete(
         messages(work, resources, profile, media))
     schema = sent[0]["response_format"]["json_schema"]["schema"]
-    quality = schema["properties"]["quality_by_camera"]
-    assert "quality_by_camera" in schema["required"]
-    assert set(quality["required"]) == {"main", "left_wrist", "right_wrist"}
-    assert quality["additionalProperties"] is False
+    assert "quality_by_camera" not in schema["properties"]
     table = schema["properties"]["main_visibility_by_frame"]
     assert "main_visibility_by_frame" in schema["required"]
     assert table["required"] == ["V000", "V001", "V002", "V003"]
@@ -262,3 +259,27 @@ def test_conflicting_quality_summary_needs_review(model_case, answer):
     _, _, profile, media = model_case
     answer["checks"]["image_quality"]["state"] = "fail"
     assert decide(answer, media, profile)["status"] == "needs_review"
+
+
+def test_quality_call_is_separate_from_task_references_and_gripper(model_case, answer):
+    work, _, _, media = model_case
+    media["gripper"] = {"private_sensor_marker": True}
+    request = quality_messages(work, media)
+    seen = []
+    def respond(sent):
+        seen.append(json.loads(sent.content))
+        data = {"quality_by_camera": answer["quality_by_camera"]}
+        return httpx.Response(200, json={"choices": [{
+            "finish_reason": "stop", "message": {"content": json.dumps(data)}}]})
+    Qwen(work, api_key="secret", transport=httpx.MockTransport(respond)).complete(
+        request, quality_only=True)
+    schema = seen[0]["response_format"]["json_schema"]["schema"]
+    assert schema["required"] == ["quality_by_camera"]
+    assert set(schema["properties"]["quality_by_camera"]["required"]) == {
+        "main", "left_wrist", "right_wrist"}
+    assert schema["properties"]["quality_by_camera"]["additionalProperties"] is False
+    serialized = json.dumps(request)
+    for excluded in ("gripper_before", "reference_type", "private_sensor_marker"):
+        assert excluded not in serialized
+    assert sum(p["type"] == "image_url" for p in request[1]["content"]) == len(media["frames"])
+    assert media["gripper"] == {"private_sensor_marker": True}

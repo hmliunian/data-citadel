@@ -10,7 +10,7 @@ from pathlib import Path
 
 from .data import ID, file_hash, fingerprint, load_manifest, now, profile_for, read, write
 from .media import prepare_media
-from .model import Qwen, decide, messages
+from .model import Qwen, decide, messages, quality_messages
 from .resources import DEFAULT_BASE, fetch
 
 
@@ -170,12 +170,18 @@ class Service:
                     raise ValueError("References changed; prepare a new run")
                 return {**existing, "cached": True}
             stage = "model"
-            response = self.client.complete(messages(self.work, resources, profile, media), {
-                k: result[k] for k in ("result_id", "episode_id", "task_code", "split",
-                                      "configuration_sha256")})
+            context = {k: result[k] for k in (
+                "result_id", "episode_id", "task_code", "split", "configuration_sha256")}
+            response = self.client.complete(messages(self.work, resources, profile, media), context)
             result["model_call"] = {k: v for k, v in response.items() if k != "data"}
+            stage = "quality"
+            quality = self.client.complete(quality_messages(self.work, media),
+                                           {**context, "stage": stage}, quality_only=True)
+            result["quality_call"] = {k: v for k, v in quality.items() if k != "data"}
+            if set(quality["data"]) != {"quality_by_camera"}:
+                raise ValueError("Quality response must contain only camera quality")
             stage = "evidence"
-            result.update(decide(response["data"], media, profile))
+            result.update(decide({**response["data"], **quality["data"]}, media, profile))
         except Exception as exc:
             # Responses are retained separately; do not expose URLs, keys or vendor error bodies.
             result.update(reason=f"处理失败：{stage} / {type(exc).__name__}",

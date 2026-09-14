@@ -89,11 +89,16 @@ def service_case(tmp_path, dataset, model_case, answer, jpeg):
         def __init__(self):
             self.requests = []
             self.error = None
-        def complete(self, request_messages, context):
+        def complete(self, request_messages, context, *, quality_only=False):
             self.requests.append(copy.deepcopy(request_messages))
             if self.error:
                 raise self.error
-            return {"data": copy.deepcopy(answer), "model": self.model, "usage": {}}
+            data = copy.deepcopy(answer)
+            if quality_only:
+                data = {"quality_by_camera": data["quality_by_camera"]}
+            else:
+                data.pop("quality_by_camera")
+            return {"data": data, "model": self.model, "usage": {}}
     client = FakeClient()
     def load_media(output, source, sampling):
         assert set(source) == {"episode_id", "mcap_path", "mcap_sha256"}

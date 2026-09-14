@@ -56,7 +56,7 @@ def test_review_round_trip_and_report(api, service_case):
     second = api.post("/reviews", json={"episode_id": episode_id})
     assert first.status_code == second.status_code == 200
     assert first.json()["label"] == "correct" and second.json()["cached"]
-    assert len(fake.requests) == 1
+    assert len(fake.requests) == 2
     result = api.get("/results/" + episode_id).json()
     assert result["checks"]["object_match"]["state"] == "pass"
     assert result["checks"]["scene_match"]["state"] == "pass"
@@ -67,7 +67,7 @@ def test_cli_runs_and_exports_complete_denominator(service_case, monkeypatch, ca
     service, client = service_case
     monkeypatch.setattr("citadel.__main__.Service", lambda *args: service)
     assert main(["run", "--limit", "1"]) == 0
-    assert len(client.requests) == 1
+    assert len(client.requests) == 2
     capsys.readouterr()
     assert main(["report"]) == 0
     exported = json.loads(capsys.readouterr().out)

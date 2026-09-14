@@ -12,7 +12,7 @@ def test_gt_never_sent_and_result_reused(service_case):
     first = service.review(episode_id)
     second = service.review(episode_id)
     assert first["label"] == "correct" and first["evaluation"]["gt"] == "incorrect"
-    assert not first["cached"] and second["cached"] and len(client.requests) == 1
+    assert not first["cached"] and second["cached"] and len(client.requests) == 2
     sent = json.dumps(client.requests)
     for sentinel in ("PRIVATE_GT_REASON", "PRIVATE_REVIEWER", "Accepted", "Denied", '"gt"'):
         assert sentinel not in sent
@@ -34,7 +34,7 @@ def test_failed_call_requires_explicit_retry(service_case):
     assert service.review(episode_id)["status"] == "failed"
     assert len(client.requests) == 1
     assert service.review(episode_id, retry_failed=True)["status"] == "completed"
-    assert len(client.requests) == 2
+    assert len(client.requests) == 3
 
 
 def test_holdout_requires_complete_development_and_unchanged_freeze(service_case):
@@ -63,7 +63,7 @@ def test_configuration_change_does_not_reuse_old_result(service_case):
     profiles["grasp"]["allowed"] = "其他允许的路径"
     service.profiles_path.write_text(json.dumps(profiles))
     second = service.review(episode_id)
-    assert len(client.requests) == 2
+    assert len(client.requests) == 4
     assert first["configuration_sha256"] != second["configuration_sha256"]
 
 
@@ -108,7 +108,7 @@ def test_batch_is_bounded_resumable_and_exclusive(service_case):
     assert all(r["status"] == "completed" for r in results)
     assert len({r["configuration_sha256"] for r in results}) == 1
     assert all(r["cached"] for r in service.run(workers=2))
-    assert len(client.requests) == 6
+    assert len(client.requests) == 12
 
 
 def test_changed_code_cannot_be_mislabeled_as_loaded_version(service_case, monkeypatch):
@@ -117,3 +117,29 @@ def test_changed_code_cannot_be_mislabeled_as_loaded_version(service_case, monke
     with pytest.raises(GateError, match="restart"):
         service.review(service.manifest["splits"]["development"][0])
     assert client.requests == []
+
+
+def test_quality_failure_does_not_release_a_successful_action(service_case):
+    service, client = service_case
+    original = client.complete
+    def complete(*args, quality_only=False, **kwargs):
+        if quality_only:
+            raise RuntimeError("quality unavailable")
+        return original(*args, **kwargs)
+    client.complete = complete
+    result = service.review(service.manifest["splits"]["development"][0])
+    assert result["status"] == "failed" and result["label"] is None
+    assert result["error"]["stage"] == "quality" and "model_call" in result
+
+def test_quality_response_cannot_overwrite_task_checks(service_case):
+    service, client = service_case
+    original = client.complete
+    def complete(*args, quality_only=False, **kwargs):
+        response = original(*args, quality_only=quality_only, **kwargs)
+        if quality_only:
+            response["data"]["checks"] = {"action": {"state": "fail", "evidence_ids": ["V000"]}}
+        return response
+    client.complete = complete
+    result = service.review(service.manifest["splits"]["development"][0])
+    assert result["status"] == "failed" and result["label"] is None
+    assert result["error"]["stage"] == "quality"
