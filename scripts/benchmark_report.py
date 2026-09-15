@@ -303,10 +303,12 @@ def markdown(summary, frozen):
         "```bash\n# 新环境\nbash scripts/bootstrap.sh\n.tools/bin/just setup\n\n"
         "# 查看已保存结果；不调用模型\n.tools/bin/just benchmark-report\n\n"
         "# 从回执生成本报告；不调用模型\n.tools/bin/just benchmark-report --publish docs/benchmarks/2026-09-15\n\n"
-        "# 有原始数据、任务资源网络和 Qwen 凭据时运行实验\n.tools/bin/just benchmark prepare\n"
+        "# 有原始数据、输入缓存、任务资源网络和 Qwen 凭据时运行实验\n.tools/bin/just benchmark prepare\n"
         ".tools/bin/just benchmark run\n```",
         "运行配置见 [benchmark.toml](../../../config/benchmark.toml)，价格快照见 "
         "[cny_20260915.json](../../../config/prices/cny_20260915.json)。"
+        f"运行需要 `{frozen['plan']['input_run']}/` 中既有的 manifest、media（含 gripper.json）与 resources 缓存，"
+        "以及清单对应的只读 MCAP；这些文件不随 Git 分发。benchmark 复用并校验输入缓存，不负责从零生成缓存。"
         "复用现有实验要求模型代码、prompt、规则、配置和数据哈希与冻结版本一致；"
         "另做一轮需使用新的配置文件与 output 目录，不能覆盖本轮回执。",
         "[summary.json](summary.json) 保存完整统计；[models.csv](models.csv)、[episodes.csv](episodes.csv)、"

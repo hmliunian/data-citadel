@@ -14,7 +14,7 @@ def report_case(tmp_path):
     messages = [{"role": "system", "content": "Return JSON."}]
     audit = {episode_id: {"frames": 4, "task_messages_sha256": fingerprint(messages),
                           "quality_messages_sha256": fingerprint(messages)} for episode_id in ids}
-    plan = {"models": ["fake"], "output": "artifacts/experiments/fake", "temperature": 0,
+    plan = {"models": ["fake"], "input_run": "artifacts/input", "output": "artifacts/experiments/fake", "temperature": 0,
             "max_tokens": 5000, "timeout_s": 180, "attempts": 2}
     frozen = {"created_at": "2026-09-15T00:00:00+00:00", "git_commit": "test", "purpose": "test",
               "plan": plan, "plan_sha256": fingerprint(plan), "runner_sha256": "test",
