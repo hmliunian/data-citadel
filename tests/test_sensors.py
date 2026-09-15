@@ -5,7 +5,8 @@ import flatbuffers
 import pytest
 
 from citadel.infrastructure.mcap.flatbuffer import Schema
-from citadel.infrastructure.mcap.sensors import TOPICS, intervals, prepare_gripper, read_gripper
+from citadel.domain.signals import intervals
+from citadel.infrastructure.mcap.sensors import TOPICS, prepare_gripper, read_gripper
 
 
 def vector_fixture(inline):

@@ -1,6 +1,8 @@
 """Small file operations shared by storage adapters."""
 import hashlib
 import json
+import os
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -11,9 +13,16 @@ def read(path: Path):
 
 def write(path: Path, value):
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("x", encoding="utf-8") as out:
-        json.dump(value, out, ensure_ascii=False, indent=2)
-        out.write("\n")
+    descriptor, temporary = tempfile.mkstemp(dir=path.parent, prefix=".pending-")
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as out:
+            json.dump(value, out, ensure_ascii=False, indent=2)
+            out.write("\n")
+            out.flush()
+            os.fsync(out.fileno())
+        os.link(temporary, path)
+    finally:
+        os.unlink(temporary)
 
 
 def fingerprint(value):
@@ -27,4 +36,3 @@ def file_hash(path: Path):
 
 def now():
     return datetime.now(timezone.utc).isoformat()
-

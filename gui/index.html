@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>UMI-T · 原子任务测试</title>
+<link rel="stylesheet" href="/style.css">
+<header><h1>UMI-T · 原子任务测试</h1><span id="task" class="muted"></span></header>
+<p class="muted">按误放、误拒筛选，对照 GT 与算法结论。三路完整视频可直接播放或下载；拼接视频按每 1 秒采样。</p>
+<div class="toolbar">
+<select id="run" aria-label="选择实验"></select>
+<select id="filter" aria-label="筛选审核结果">
+<option value="all">全部记录</option><option value="errors">全部错例</option>
+<option value="false_accept">误放</option><option value="false_reject">误拒</option>
+<option value="needs_review">待复核</option>
+</select>
+<select id="episode" aria-label="选择采集记录"></select>
+<button id="prepare">输入预览 / 准备视频</button>
+<button id="review" class="primary">开始审核</button>
+<a href="/docs" class="muted">API 文档</a>
+</div>
+<p id="notice" role="status" class="muted">正在加载记录…</p>
+<section id="debug" hidden>
+<h2>输入与调用调试</h2><p id="version" class="muted"></p>
+<details><summary>实际模型输入预览（图片显示摘要）</summary><pre id="preview"></pre></details>
+<details><summary>模型调用记录、用量和原始响应</summary><pre id="trace"></pre></details>
+<div class="toolbar"><select id="history" aria-label="选择历史结果"></select><button id="compare">与当前结果比较</button></div>
+<div class="compare"><pre id="current-version"></pre><pre id="past-version"></pre></div>
+</section>
+<section id="videos" hidden>
+<h2>三路拼接（每 1 秒采样）</h2><video id="stitched" controls preload="metadata"></video>
+<div class="cameras">
+<div><p class="muted">主镜头完整视频 · <a id="download_main" class="muted" download>下载 MP4</a></p><video id="main" controls preload="metadata"></video></div>
+<div><p class="muted">左腕完整视频 · <a id="download_left_wrist" class="muted" download>下载 MP4</a></p><video id="left_wrist" controls preload="metadata"></video></div>
+<div><p class="muted">右腕完整视频 · <a id="download_right_wrist" class="muted" download>下载 MP4</a></p><video id="right_wrist" controls preload="metadata"></video></div>
+</div></section>
+<section id="signals" hidden><h2>夹爪与触觉时序</h2>
+<p class="muted">点击曲线定位对应视频时间。触觉强度为测点力向量模长之和，用于比较受力变化。</p>
+<canvas id="gripper" width="1200" height="370" style="width:100%;cursor:crosshair" aria-label="夹爪位置和指尖受力曲线"></canvas></section>
+<section id="result" hidden>
+<h2 id="conclusion"></h2><p id="reason"></p><p id="comparison" class="muted"></p>
+<table><thead><tr><th>检查项</th><th>判定</th><th>证据时间 / 画质说明</th></tr></thead><tbody id="checks"></tbody></table>
+<details id="main-audit" hidden><summary>主镜头逐帧可见性（模型判定，点击定位视频）</summary><div id="main-frames" class="toolbar"></div></details>
+<h2>时序观察</h2><ol id="observations"></ol>
+<h2>证据帧</h2><div id="evidence" class="evidence"></div>
+</section>
+<section><h2>评测进度</h2><p id="stats" class="muted">尚未统计</p></section>
+<script type="module" src="/app.js"></script>
+</html>

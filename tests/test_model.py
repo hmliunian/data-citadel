@@ -1,3 +1,5 @@
+from citadel.configuration import PromptBundle
+from citadel.infrastructure.resources import image_input
 import copy
 import json
 
@@ -10,8 +12,8 @@ from citadel.domain.decision import decide
 from citadel.infrastructure.qwen import QwenGateway as Qwen
 from citadel.application.prompts import PromptBuilder
 
-messages = PromptBuilder().review
-quality_messages = PromptBuilder().quality
+messages = PromptBuilder(PromptBundle.load(), image_input).review
+quality_messages = PromptBuilder(PromptBundle.load(), image_input).quality
 
 
 def test_basic_grasp_and_actual_timestamps(model_case, answer):

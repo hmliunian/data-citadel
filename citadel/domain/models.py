@@ -1,11 +1,23 @@
 """Review data contracts, independent of HTTP, storage and media libraries."""
 from typing import Literal
+from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
 
 CAMERAS = ("main", "left_wrist", "right_wrist")
 CHECKS = ("object_match", "scene_match", "main_visibility", "image_quality",
           "action", "retry_free", "completeness")
+
+
+class EpisodeInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    episode_id: str = Field(pattern=r"^[0-9a-f]{32}$")
+    task_code: str = Field(pattern=r"^DL-[A-Z0-9]+$")
+    mcap_path: Path
+    mcap_sha256: str
+
+    def media_source(self):
+        return self.model_dump(mode="json", exclude={"task_code"})
 
 
 class Check(BaseModel):
@@ -37,5 +49,4 @@ class Review(BaseModel):
 class QualityReview(BaseModel):
     model_config = ConfigDict(extra="forbid")
     quality_by_camera: dict[str, CameraQuality]
-
 

@@ -1,0 +1,11 @@
+[server]
+host = "127.0.0.1"
+port = 8770
+work_dir = "artifacts/server"
+workers = 3
+media_workers = 1
+max_pending = 128
+resource_base = "http://172.100.11.189:8001"
+
+[runs.grasp]
+dataset = "/home/xuran/projects/data_review/datasets/DL-NA52UU"

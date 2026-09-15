@@ -1,5 +1,8 @@
 import io
 import copy
+import json
+import shutil
+import threading
 from pathlib import Path
 
 import pytest
@@ -8,7 +11,9 @@ from PIL import Image
 from citadel.infrastructure.files import file_hash, fingerprint, write
 from citadel.infrastructure.datasets import prepare
 from citadel.domain.models import CHECKS
-from citadel.service import Service
+from citadel.bootstrap import build_run, build_runtime
+from citadel.configuration import CONFIG_ROOT, Configuration, ServerSettings
+from citadel.infrastructure.qwen import QwenGateway
 
 
 @pytest.fixture
@@ -81,8 +86,9 @@ def service_case(tmp_path, dataset, model_case, answer, jpeg):
     work = tmp_path / "run"
     prepare(dataset, work)
     (work / "image.jpg").write_bytes(jpeg)
-    profiles = work / "rules.json"
-    write(profiles, {"grasp": {**profile, "action_ids": ["A_001"]}})
+    config = tmp_path / "config"
+    shutil.copytree(CONFIG_ROOT, config)
+    (config / "tasks.json").write_text(json.dumps({"grasp": {**profile, "action_ids": ["A_001"]}}))
     resources = {**resources, "task_code": "DL-TEST"}
     resources["sha256"] = fingerprint(resources)
     class FakeClient:
@@ -100,6 +106,8 @@ def service_case(tmp_path, dataset, model_case, answer, jpeg):
             else:
                 data.pop("quality_by_camera")
             return {"data": data, "model": self.model, "usage": {}}
+        def preview(self, messages, *, quality_only=False):
+            return QwenGateway(work).preview(messages, quality_only=quality_only)
     client = FakeClient()
     def load_media(output, source, sampling):
         assert set(source) == {"episode_id", "mcap_path", "mcap_sha256"}
@@ -116,6 +124,18 @@ def service_case(tmp_path, dataset, model_case, answer, jpeg):
         if not (folder / "media.json").exists():
             write(folder / "media.json", result)
         return result
-    service = Service(work, profiles, client=client,
-                      resource_loader=lambda *args: resources, media_loader=load_media)
-    return service, client
+    run = build_run("test", work, Configuration(config), "https://example.invalid",
+                    threading.BoundedSemaphore(1), resource_loader=lambda *args: resources,
+                    media_loader=load_media, gateway_factory=lambda snapshot: client)
+    return run, client
+
+
+@pytest.fixture
+def runtime_case(tmp_path, service_case):
+    run, client = service_case
+    runtime = build_runtime(settings=ServerSettings(work_dir=tmp_path / "server", workers=2),
+                            runs={"test": run})
+    try:
+        yield runtime, client
+    finally:
+        runtime.jobs.close()

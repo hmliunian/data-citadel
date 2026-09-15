@@ -9,7 +9,7 @@ from pathlib import Path
 
 import httpx
 
-from citadel.configuration import PROJECT_ROOT
+from citadel.configuration import ModelSettings, PROJECT_ROOT
 from citadel.domain.models import CAMERAS, CHECKS, QualityReview, Review
 from .files import fingerprint, write
 
@@ -27,20 +27,15 @@ def safe_messages(value):
 
 
 class QwenGateway:
-    def __init__(self, work: Path, *, model=None, base_url=None, api_key=None, transport=None):
+    def __init__(self, work: Path, *, model=None, base_url=None, api_key=None, transport=None,
+                 settings: ModelSettings | None = None):
         self.work, self.api_key, self.transport = work, api_key, transport
-        self.model = model or os.getenv("QWEN_MODEL", "qwen3.8-max-0902")
+        self.settings = settings or ModelSettings()
+        self.model = model or os.getenv("QWEN_MODEL", self.settings.model)
         self.base_url = (base_url or os.getenv(
-            "QWEN_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1")).rstrip("/")
+            "QWEN_BASE_URL", self.settings.base_url)).rstrip("/")
 
-    def complete(self, request_messages, context=None, *, quality_only=False):
-        key = self.api_key or os.getenv("QWEN_API_KEY") or os.getenv("DASHSCOPE_API_KEY")
-        if not key:
-            file = os.getenv("QWEN_API_KEY_FILE")
-            path = Path(file) if file else PROJECT_ROOT / "Qwen-api/qwen_api_key.txt"
-            key = path.read_text().strip()
-        if not key or any(c.isspace() for c in key):
-            raise ValueError("Qwen key must be a single nonempty token")
+    def payload(self, request_messages, *, quality_only=False):
         count, frame_states = 0, {}
         for message in request_messages:
             if isinstance(message["content"], list):
@@ -53,12 +48,13 @@ class QwenGateway:
                             frame_states[frame["frame_id"]] = (
                                 ["visible", "absent", "uncertain"]
                                 if frame["source_times_s"].get("main") is not None else ["no_frame"])
-        if count > 250:
+        if count > self.settings.max_images:
             raise ValueError("Total image input exceeds this workflow's 250-image limit")
-        payload = {"model": self.model, "messages": request_messages, "temperature": 0,
-                   "max_tokens": 5000, "response_format": {"type": "json_object"}}
+        payload = {"model": self.model, "messages": request_messages,
+                   "temperature": self.settings.temperature,
+                   "max_tokens": self.settings.max_tokens, "response_format": {"type": "json_object"}}
         if self.model.startswith(("qwen3.8-max", "qwen3.5-plus", "qwen3-vl-plus", "qwen3-vl-flash")):
-            payload["enable_thinking"] = False
+            payload["enable_thinking"] = self.settings.enable_thinking
         if self.model.startswith("qwen3.8-max"):
             schema = (QualityReview if quality_only else Review).model_json_schema()
             if quality_only:
@@ -76,8 +72,26 @@ class QwenGateway:
                     "required": list(frame_states), "additionalProperties": False}
             payload["response_format"] = {"type": "json_schema", "json_schema": {
                 "name": "atomic_task_review", "strict": True, "schema": schema}}
-        with httpx.Client(timeout=httpx.Timeout(180, connect=15), transport=self.transport) as client:
-            for attempt in range(2):
+        return payload
+
+    def preview(self, request_messages, *, quality_only=False):
+        payload = self.payload(request_messages, quality_only=quality_only)
+        return {**payload, "messages": safe_messages(request_messages)}
+
+    def complete(self, request_messages, context=None, *, quality_only=False):
+        key = self.api_key or os.getenv("QWEN_API_KEY") or os.getenv("DASHSCOPE_API_KEY")
+        if not key:
+            file = os.getenv("QWEN_API_KEY_FILE")
+            path = Path(file) if file else PROJECT_ROOT / "Qwen-api/qwen_api_key.txt"
+            key = path.read_text().strip()
+        if not key or any(c.isspace() for c in key):
+            raise ValueError("Qwen key must be a single nonempty token")
+        payload = self.payload(request_messages, quality_only=quality_only)
+        count = sum(part["type"] == "image_url" for message in request_messages
+                    if isinstance(message["content"], list) for part in message["content"])
+        timeout = httpx.Timeout(self.settings.timeout_s, connect=self.settings.connect_timeout_s)
+        with httpx.Client(timeout=timeout, transport=self.transport) as client:
+            for attempt in range(self.settings.attempts):
                 folder = self.work / "calls" / uuid.uuid4().hex
                 write(folder / "request.json", {
                     "model": self.model, "base_url": self.base_url, "attempt": attempt + 1,
@@ -90,7 +104,7 @@ class QwenGateway:
                                            headers={"Authorization": "Bearer " + key})
                 except httpx.TransportError as exc:
                     write(folder / "error.json", {"type": type(exc).__name__})
-                    if attempt == 0:
+                    if attempt + 1 < self.settings.attempts:
                         continue
                     raise RuntimeError("Qwen transport failure") from exc
                 try:
@@ -101,7 +115,7 @@ class QwenGateway:
                 write(folder / "response.json", {"status": response.status_code,
                                                  "elapsed_s": elapsed, "body": raw})
                 if response.status_code >= 400:
-                    if attempt == 0 and response.status_code in (429, 500, 502, 503, 504):
+                    if attempt + 1 < self.settings.attempts and response.status_code in (429, 500, 502, 503, 504):
                         time.sleep(1)
                         continue
                     raise RuntimeError(f"Qwen HTTP {response.status_code}")
@@ -113,5 +127,4 @@ class QwenGateway:
                         "elapsed_s": elapsed, "call_path": str(folder.relative_to(self.work)),
                         "request_id": raw.get("id")}
         raise RuntimeError("Qwen returned no result")
-
 

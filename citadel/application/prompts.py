@@ -3,13 +3,13 @@ import json
 from pathlib import Path
 
 from citadel.configuration import PromptBundle
-from citadel.infrastructure.resources import image_input
-from citadel.infrastructure.mcap.sensors import TOPICS as GRIPPER_CHANNELS, intervals
+from .ports import ImageLoader
+from citadel.domain.signals import CHANNELS as GRIPPER_CHANNELS, intervals
 
 
 class PromptBuilder:
-    def __init__(self, prompts: PromptBundle | None = None):
-        self.prompts = prompts or PromptBundle.load()
+    def __init__(self, prompts: PromptBundle, image_loader: ImageLoader):
+        self.prompts, self.image_loader = prompts, image_loader
 
     def review(self, work: Path, resources: dict, profile: dict, media: dict):
         timeline = [{"frame_id": f["frame_id"], "time_s": f["time_s"],
@@ -30,7 +30,7 @@ class PromptBuilder:
                 {"type": "text", "text": json.dumps(
                     {"reference_type": item["type"], "name": item["name"], "id": item["id"]},
                     ensure_ascii=False)},
-                {"type": "image_url", "image_url": {"url": image_input(work, item)}}])
+                {"type": "image_url", "image_url": {"url": self.image_loader(work, item)}}])
         gripper = media.get("gripper")
         if gripper:
             content.insert(1, {"type": "text", "text": json.dumps({
@@ -43,7 +43,7 @@ class PromptBuilder:
         for frame, timing in zip(media["frames"], timeline):
             content.extend([
                 {"type": "text", "text": json.dumps({"candidate_frame": timing}, ensure_ascii=False)},
-                {"type": "image_url", "image_url": {"url": image_input(work, frame)}}])
+                {"type": "image_url", "image_url": {"url": self.image_loader(work, frame)}}])
         return [{"role": "system", "content": self.prompts.review_system + ("\n" + self.prompts.gripper if gripper else "")},
                 {"role": "user", "content": content}]
 

@@ -1,3 +1,4 @@
+from citadel.infrastructure.resources import image_input
 import hashlib
 from dataclasses import replace
 
@@ -16,7 +17,7 @@ def test_extracted_prompts_preserve_review_and_quality_inputs(model_case):
     assert {key: hashlib.sha256(value.encode()).hexdigest()
             for key, value in bundle.as_dict().items()} == expected
     work, resources, profile, media = model_case
-    builder = PromptBuilder(bundle)
+    builder = PromptBuilder(bundle, image_input)
     assert builder.review(work, resources, profile, media)[0]["content"] == bundle.review_system
     assert builder.quality(work, media)[0]["content"] == bundle.quality
 
@@ -26,5 +27,5 @@ def test_prompt_snapshot_is_stable_and_changes_signature(model_case):
     changed = replace(original, review_system=original.review_system + "新的审核说明。")
     assert fingerprint(original.as_dict()) != fingerprint(changed.as_dict())
     work, resources, profile, media = model_case
-    builder = PromptBuilder(original)
+    builder = PromptBuilder(original, image_input)
     assert builder.review(work, resources, profile, media)[0]["content"] == original.review_system
