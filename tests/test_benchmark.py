@@ -1,61 +1,124 @@
 import copy
 import json
+from pathlib import Path
 
 import pytest
 
-from citadel.application.prompts import PromptBuilder
-from citadel.configuration import PromptBundle
-from citadel.domain.tasks import profile_for
-from citadel.infrastructure.files import fingerprint, write
-from citadel.infrastructure.resources import image_input
+from citadel.domain.errors import BusyError
+from citadel.infrastructure.execution import LocalExecutor
+from citadel.infrastructure.files import file_hash, fingerprint, read, write
+from citadel.infrastructure.resources import fetch
+from citadel.infrastructure.storage import ArtifactRepository
 from scripts.benchmark import Benchmark, PacedGateway
 from scripts.benchmark_report import price_usage, summarize
 
 
-def test_prepared_inputs_survive_config_snapshot_round_trip(tmp_path, service_case, monkeypatch):
+@pytest.fixture
+def benchmark_setup(tmp_path, service_case, model_case, jpeg, monkeypatch):
     run, fake = service_case
-    benchmark = Benchmark.__new__(Benchmark)
-    benchmark.work, benchmark.inputs = tmp_path / "benchmark", run.artifacts.work
-    benchmark.source, benchmark.config, benchmark.pricing = run.source, run.configuration, {}
-    benchmark.plan = {"models": ["fake"], "resource_base": "https://example.invalid"}
-    benchmark.plan_path = tmp_path / "plan.toml"
-    benchmark.plan_path.write_text('models = ["fake"]')
-    media = {}
-    for episode_id in run.source.records():
-        source = run.source.source(episode_id)
-        item = run.reviews.media.prepare(source, run.source.manifest["sampling"])
-        item["signature"] = {**run.source.manifest["sampling"], "mcap_sha256": source.mcap_sha256}
-        item["gripper"] = {"sha256": "empty", "warnings": [], "channels": {}}
-        media[episode_id] = item
-    benchmark.media = lambda episode_id: copy.deepcopy(media[episode_id])
-    monkeypatch.setattr("scripts.benchmark.fetch", lambda *args: run.resources.get("DL-TEST"))
-    frozen = benchmark.prepare()
-    # Loading the saved snapshot is what a later, separate run process does.
-    saved = json.loads((benchmark.work / "experiment.json").read_text())
-    assert saved == frozen
-    result = benchmark.run_one("fake", sorted(media)[0], saved, PacedGateway(fake, 1_000_000))
-    assert result["status"] == "completed" and len(fake.requests) == 2
+    _, references, _, template = model_case
+    pricing = tmp_path / "pricing.json"
+    write(pricing, {"models": {"fake": {"tiers": [[1_000_000, 1, 2, .2]]}}})
+    plan_path = tmp_path / "plan.toml"
+    plan_path.write_text(
+        f'dataset = {json.dumps(run.source.manifest["dataset"])}\n'
+        f'output = {json.dumps(str(tmp_path / "benchmark"))}\n'
+        f'config_root = {json.dumps(str(run.configuration.root))}\n'
+        f'pricing = {json.dumps(str(pricing))}\n'
+        'models = ["fake"]\nresource_base = "https://example.invalid"\n'
+        'base_url = "https://example.invalid/v1"\ndefault_tpm = 1000000\nmodel_tpm = {}\n')
+    prepared = []
+    def load_resources(code, work, base):
+        folder = work / "resources" / code
+        if not (folder / "task.json").exists():
+            folder.mkdir(parents=True, exist_ok=True)
+            (folder / "object.jpg").write_bytes(jpeg)
+            value = copy.deepcopy(references)
+            value["task_code"] = code
+            value["images"][0]["path"] = str((folder / "object.jpg").relative_to(work))
+            value["sha256"] = fingerprint(value)
+            write(folder / "task.json", value)
+        return fetch(code, work, base)
+    def load_media(work, source, sampling):
+        assert set(source) == {"episode_id", "mcap_path", "mcap_sha256"}
+        assert file_hash(Path(source["mcap_path"])) == source["mcap_sha256"]
+        episode_id = source["episode_id"]
+        folder = work / "media" / episode_id
+        if not (folder / "media.json").exists():
+            prepared.append(episode_id)
+            folder.mkdir(parents=True, exist_ok=True)
+            media = copy.deepcopy(template)
+            media.update(episode_id=episode_id, videos={},
+                         signature={**sampling, "mcap_sha256": source["mcap_sha256"]})
+            for frame in media["frames"]:
+                target = folder / (frame["frame_id"] + ".jpg")
+                target.write_bytes(jpeg)
+                frame["path"] = str(target.relative_to(work))
+            write(folder / "media.json", media)
+            gripper = {"warnings": [], "channels": {}}
+            write(folder / "gripper.json", {**gripper, "sha256": fingerprint(gripper)})
+        return ArtifactRepository(work).media(episode_id)
+    monkeypatch.setattr("scripts.benchmark.fetch", load_resources)
+    monkeypatch.setattr("scripts.benchmark.prepare_media", load_media)
+    return Benchmark(plan_path), fake, prepared
 
 
 @pytest.fixture
-def benchmark_case(tmp_path, service_case):
-    run, fake = service_case
-    benchmark = Benchmark.__new__(Benchmark)
-    benchmark.work = tmp_path / "benchmark"
-    benchmark.inputs = run.artifacts.work
-    benchmark.source = run.source
-    episode_id = run.source.manifest["splits"]["development"][0]
-    media = run.reviews.media.prepare(run.source.source(episode_id), run.snapshot().data["sampling"])
-    resources = run.resources.get("DL-TEST")
-    write(benchmark.inputs / "resources/DL-TEST/task.json", resources)
-    benchmark.media = lambda _: copy.deepcopy(media)
-    snapshot = run.snapshot().data
-    builder = PromptBuilder(PromptBundle(**snapshot["prompts"]), image_input)
-    profile = profile_for(resources, snapshot["profiles"])
-    audit = {"task_messages_sha256": fingerprint(builder.review(benchmark.inputs, resources, profile, media)),
-             "quality_messages_sha256": fingerprint(builder.quality(benchmark.inputs, media))}
-    frozen = {"sha256": "test-version", "configuration": snapshot, "input_audit": {episode_id: audit}}
-    return benchmark, fake, episode_id, frozen
+def benchmark_case(benchmark_setup):
+    benchmark, fake, _ = benchmark_setup
+    frozen = benchmark.prepare()
+    return benchmark, fake, sorted(frozen["input_audit"])[0], frozen
+
+
+def test_benchmark_prepares_without_legacy_cache_and_reopens(benchmark_setup, service_case):
+    benchmark, fake, prepared = benchmark_setup
+    assert not benchmark.work.exists()
+    frozen = benchmark.prepare()
+    assert fake.requests == []
+    assert benchmark.inputs.is_relative_to(benchmark.work)
+    assert frozen["manifest"]["splits"] == service_case[0].source.manifest["splits"]
+    assert set(prepared) == set(frozen["input_audit"])
+    assert "PRIVATE_GT_REASON" not in (benchmark.work / "inputs" / (prepared[0] + ".json")).read_text()
+    reopened = Benchmark(benchmark.plan_path)
+    assert reopened.prepare() == frozen == read(benchmark.work / "experiment.json")
+    assert len(prepared) == len(frozen["input_audit"])
+    result = reopened.run_one("fake", prepared[0], frozen, PacedGateway(fake, 1_000_000))
+    assert result["status"] == "completed" and len(fake.requests) == 2
+
+
+def test_benchmark_resumes_preparation_without_overwriting_inputs(benchmark_setup, monkeypatch):
+    benchmark, fake, prepared = benchmark_setup
+    from scripts import benchmark as module
+    loader = module.prepare_media
+    def interrupt(work, source, sampling):
+        if len(prepared) == 1:
+            raise RuntimeError("interrupted preparation")
+        return loader(work, source, sampling)
+    monkeypatch.setattr(module, "prepare_media", interrupt)
+    with pytest.raises(RuntimeError, match="interrupted preparation"):
+        benchmark.prepare()
+    assert not (benchmark.work / "experiment.json").exists()
+    first = benchmark.work / "inputs" / (prepared[0] + ".json")
+    original = first.read_bytes()
+    monkeypatch.setattr(module, "prepare_media", loader)
+    reopened = Benchmark(benchmark.plan_path)
+    frozen = reopened.prepare()
+    assert len(prepared) == len(set(prepared)) == len(frozen["input_audit"])
+    assert first.read_bytes() == original and fake.requests == []
+
+
+def test_interrupted_preparation_cannot_mix_configurations(benchmark_setup, monkeypatch):
+    benchmark, fake, prepared = benchmark_setup
+    def interrupt(*args):
+        raise RuntimeError("interrupted")
+    monkeypatch.setattr("scripts.benchmark.prepare_media", interrupt)
+    with pytest.raises(RuntimeError, match="interrupted"):
+        benchmark.prepare()
+    prompt = benchmark.config.root / "prompts/quality.txt"
+    prompt.write_text(prompt.read_text() + "\nchanged")
+    with pytest.raises(ValueError, match="Frozen content changed"):
+        Benchmark(benchmark.plan_path).prepare()
+    assert not prepared and fake.requests == []
 
 
 def test_benchmark_reuses_results_and_separates_model_inputs_from_gt(benchmark_case):
@@ -79,12 +142,66 @@ def test_benchmark_does_not_replay_an_interrupted_paid_request(benchmark_case):
     assert fake.requests == []
 
 
-def test_benchmark_rejects_changed_inputs_before_calling_model(benchmark_case):
+@pytest.mark.parametrize("changed", ["audit", "frame", "reference", "gripper", "media", "mcap", "receipt"])
+def test_benchmark_rejects_changed_inputs_before_calling_model(benchmark_case, changed):
     benchmark, fake, episode_id, frozen = benchmark_case
-    frozen["input_audit"][episode_id]["task_messages_sha256"] = "another-input"
-    with pytest.raises(ValueError, match="input changed"):
+    folder = benchmark.inputs / "media" / episode_id
+    if changed == "audit":
+        frozen["input_audit"][episode_id]["task_messages_sha256"] = "another-input"
+    elif changed == "frame":
+        (folder / "V000.jpg").write_bytes(b"changed frame")
+    elif changed == "reference":
+        (benchmark.inputs / "resources/DL-TEST/object.jpg").write_bytes(b"changed reference")
+    elif changed == "gripper":
+        # A valid new receipt still differs from the frozen input.
+        value = {"channels": {}, "warnings": ["changed"]}
+        (folder / "gripper.json").write_text(json.dumps({**value, "sha256": fingerprint(value)}))
+    elif changed == "media":
+        path = folder / "media.json"
+        value = read(path)
+        value["warnings"] = ["changed"]
+        path.write_text(json.dumps(value))
+    elif changed == "mcap":
+        benchmark.source.source(episode_id).mcap_path.write_bytes(b"changed source")
+    else:
+        path = benchmark.dataset / "receipts" / (episode_id + ".json")
+        path.write_text(path.read_text() + "\n")
+    with pytest.raises(ValueError):
         benchmark.run_one("fake", episode_id, frozen, PacedGateway(fake, 1_000_000))
     assert fake.requests == []
+    assert not (benchmark.work / "models/fake/results" / (episode_id + ".started.json")).exists()
+
+
+@pytest.mark.parametrize("changed", ["plan", "prompt"])
+def test_benchmark_rejects_changed_frozen_protocol(benchmark_case, changed):
+    benchmark, fake, _, _ = benchmark_case
+    path = (benchmark.plan_path if changed == "plan" else
+            benchmark.config.root / "prompts/quality.txt")
+    path.write_text(path.read_text() + "\n# changed")
+    with pytest.raises(ValueError, match="changed"):
+        Benchmark(benchmark.plan_path).validate()
+    assert fake.requests == []
+
+
+def test_benchmark_guards_preparation_and_run_with_the_same_lock(benchmark_case):
+    benchmark, fake, _, _ = benchmark_case
+    guard = LocalExecutor(benchmark.work, 1)
+    try:
+        for action in (benchmark.prepare, benchmark.run):
+            with pytest.raises(BusyError, match="already has a scheduler"):
+                action()
+    finally:
+        guard.close()
+    assert fake.requests == []
+
+
+def test_benchmark_refuses_output_inside_source_dataset(benchmark_setup):
+    benchmark, _, _ = benchmark_setup
+    plan = benchmark.plan_path
+    plan.write_text(plan.read_text().replace(str(benchmark.work), str(benchmark.dataset / "output")))
+    with pytest.raises(ValueError, match="read-only dataset"):
+        Benchmark(plan)
+    assert not (benchmark.dataset / "output").exists()
 
 
 def test_cost_selects_one_tier_per_request_and_cache_is_not_double_counted():

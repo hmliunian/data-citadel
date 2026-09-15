@@ -7,7 +7,7 @@ import time
 
 from citadel.domain.models import EpisodeInput
 from .datasets import ID, load_manifest
-from .files import file_hash, now, read, write
+from .files import file_hash, now, read, write, write_frozen
 from .mcap.media import prepare_media
 from .mcap.sensors import read_gripper
 from .resources import fetch, image_input
@@ -73,11 +73,7 @@ class ArtifactRepository:
 
     def save_snapshot(self, snapshot):
         path = self.work / "snapshots" / (snapshot.sha256 + ".json")
-        try:
-            write(path, snapshot.data)
-        except FileExistsError:
-            if read(path) != snapshot.data:
-                raise ValueError("Snapshot content changed")
+        write_frozen(path, snapshot.data)
 
     def media(self, episode_id):
         if not ID.fullmatch(episode_id):

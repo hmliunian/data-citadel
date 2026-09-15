@@ -1,6 +1,8 @@
 # Fixed regression benchmark; no prompt tuning or independent holdout claim.
-input_run = "artifacts/visibility_v1"
-output = "artifacts/experiments/model_benchmark_20260915"
+# prepare reads this dataset and creates media/resources under output/source.
+dataset = "/home/xuran/projects/data_review/datasets/DL-NA52UU"
+# Choose a new output for each protocol or dataset change.
+output = "artifacts/experiments/model_benchmark"
 config_root = "config"
 pricing = "config/prices/cny_20260915.json"
 resource_base = "http://172.100.11.189:8001"

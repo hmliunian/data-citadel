@@ -13,23 +13,16 @@ from citadel.application.reviews import ReviewPipeline
 from citadel.configuration import Configuration, ModelSettings, PROJECT_ROOT, PromptBundle, code_version
 from citadel.domain.tasks import profile_for
 from citadel.infrastructure.execution import LocalExecutor
-from citadel.infrastructure.files import file_hash, fingerprint, now, read, write
-from citadel.infrastructure.mcap.sensors import read_gripper
+from citadel.infrastructure.datasets import prepare
+from citadel.infrastructure.files import file_hash, fingerprint, now, read, write, write_frozen
+from citadel.infrastructure.mcap.media import prepare_media
 from citadel.infrastructure.qwen import QwenGateway, safe_messages
 from citadel.infrastructure.resources import fetch, image_input
-from citadel.infrastructure.storage import EpisodeRepository
+from citadel.infrastructure.storage import ArtifactRepository, EpisodeRepository
 
 
 def load_plan(path):
     return tomllib.loads(path.read_text())
-
-
-def frozen_write(path, value):
-    try:
-        write(path, value)
-    except FileExistsError:
-        if read(path) != value:
-            raise ValueError("Frozen benchmark content changed: " + str(path))
 
 
 class PacedGateway:
@@ -53,66 +46,80 @@ class PacedGateway:
 
 class Benchmark:
     def __init__(self, plan_path):
-        self.plan_path, self.plan = plan_path, load_plan(plan_path)
-        self.work = PROJECT_ROOT / self.plan["output"]
-        self.inputs = PROJECT_ROOT / self.plan["input_run"]
-        self.source = EpisodeRepository(self.inputs)
+        self.plan_path, self.plan = plan_path.resolve(), load_plan(plan_path)
+        if "input_run" in self.plan:
+            raise ValueError("Legacy input_run plans need their recorded code; use dataset and a new output")
+        self.dataset = (PROJECT_ROOT / self.plan["dataset"]).resolve()
+        self.work = (PROJECT_ROOT / self.plan["output"]).resolve()
+        if self.work.is_relative_to(self.dataset):
+            raise ValueError("Output must be outside the read-only dataset")
+        self.inputs = self.work / "source"
+        self.artifacts = ArtifactRepository(self.inputs)
         self.config = Configuration(PROJECT_ROOT / self.plan["config_root"])
         self.pricing = read(PROJECT_ROOT / self.plan["pricing"])
-        self.work.mkdir(parents=True, exist_ok=True)
 
     def settings(self, model):
         values = {key: self.plan[key] for key in ModelSettings.model_fields if key in self.plan}
         return ModelSettings(model=model, **values)
 
-    def media(self, episode_id):
-        folder = self.inputs / "media" / episode_id
-        return {**read(folder / "media.json"), "gripper": read_gripper(folder / "gripper.json")}
+    def audit(self, source, media, references, messages):
+        if media["signature"]["mcap_sha256"] != source.mcap_sha256:
+            raise ValueError("Media belongs to another source")
+        if file_hash(source.mcap_path) != source.mcap_sha256:
+            raise ValueError("Source MCAP changed")
+        if any(media["signature"][key] != value for key, value in self.source.manifest["sampling"].items()):
+            raise ValueError("Sampling differs")
+        return {
+            "mcap_sha256": source.mcap_sha256, "resources_sha256": references["sha256"],
+            "media_sha256": file_hash(self.inputs / "media" / source.episode_id / "media.json"),
+            "gripper_sha256": media["gripper"]["sha256"], "frames": len(media["frames"]),
+            **{name + "_messages_sha256": fingerprint(value) for name, value in messages.items()}}
 
     def prepare(self):
-        """Read source/cache files and freeze fresh resources; no model requests."""
+        """Prepare and freeze experiment-owned inputs; no model requests."""
+        guard = LocalExecutor(self.work, 1)
+        try:
+            return self._prepare()
+        finally:
+            guard.close()
+
+    def _prepare(self):
         marker = self.work / "experiment.json"
         if marker.exists():
             return self.validate()
         models = self.plan["models"]
         if len(set(models)) != len(models) or not models:
             raise ValueError("Benchmark needs distinct model IDs")
-        resources = {}
-        for code in sorted({row["task_code"] for row in self.source.records().values()}):
-            fresh = fetch(code, self.work / "fresh_resources", self.plan["resource_base"])
-            cached = fetch(code, self.inputs)
-            if fresh["sha256"] != cached["sha256"]:
-                raise ValueError("Current references differ from the input cache; prepare a new input run")
-            resources[code] = cached["sha256"]
+        for model in models:
+            self.settings(model)
+            self.pricing["models"][model]
+            if self.plan["model_tpm"].get(model, self.plan["default_tpm"]) <= 0:
+                raise ValueError("Model TPM must be positive")
+        if not (self.inputs / "manifest.json").exists():
+            prepare(self.dataset, self.inputs)
+        self.source = EpisodeRepository(self.inputs)
+        if Path(self.source.manifest["dataset"]) != self.dataset:
+            raise ValueError("Dataset changed; use a new output")
         snapshot = self.config.snapshot(self.source.manifest, self.plan["resource_base"]).data
         snapshot.pop("model")
+        # Pin preparation too, so resuming cannot mix code, prompts or resource endpoints.
+        write_frozen(self.work / "preparation.json", {
+            "plan": self.plan, "plan_sha256": file_hash(self.plan_path),
+            "runner_sha256": file_hash(Path(__file__)), "configuration": snapshot, "pricing": self.pricing})
+        resources = {code: fetch(code, self.inputs, self.plan["resource_base"])["sha256"]
+                     for code in sorted({row["task_code"] for row in self.source.records().values()})}
         builder = PromptBuilder(PromptBundle(**snapshot["prompts"]), image_input)
         audit = {}
         for episode_id in sorted(self.source.records()):
             source = self.source.source(episode_id)
-            media = self.media(episode_id)
-            if media["signature"]["mcap_sha256"] != source.mcap_sha256:
-                raise ValueError("Media belongs to another source")
-            if file_hash(source.mcap_path) != source.mcap_sha256:
-                raise ValueError("Source MCAP changed")
-            if any(media["signature"][key] != value for key, value in self.source.manifest["sampling"].items()):
-                raise ValueError("Sampling differs")
-            # Freeze only media inputs actually sent to Qwen, plus the full sensor receipt.
-            for frame in media["frames"]:
-                image_input(self.inputs, frame)
-            references = fetch(source.task_code, self.inputs)
+            media = prepare_media(self.inputs, source.media_source(), self.source.manifest["sampling"])
+            references = fetch(source.task_code, self.inputs, self.plan["resource_base"])
             profile = profile_for(references, snapshot["profiles"])
-            task = builder.review(self.inputs, references, profile, media)
-            quality = builder.quality(self.inputs, media)
-            audit[episode_id] = {
-                "mcap_sha256": source.mcap_sha256, "resources_sha256": references["sha256"],
-                "media_sha256": file_hash(self.inputs / "media" / episode_id / "media.json"),
-                "gripper_sha256": media["gripper"]["sha256"],
-                "frames": len(media["frames"]),
-                "task_messages_sha256": fingerprint(task),
-                "quality_messages_sha256": fingerprint(quality)}
-            frozen_write(self.work / "inputs" / (episode_id + ".json"),
-                         {"task": safe_messages(task), "quality": safe_messages(quality), **audit[episode_id]})
+            messages = {"task": builder.review(self.inputs, references, profile, media),
+                        "quality": builder.quality(self.inputs, media)}
+            audit[episode_id] = self.audit(source, media, references, messages)
+            write_frozen(self.work / "inputs" / (episode_id + ".json"),
+                         {**{name: safe_messages(value) for name, value in messages.items()}, **audit[episode_id]})
             print(json.dumps({"prepared": len(audit), "total": len(self.source.records())}), flush=True)
         experiment = {
             "created_at": now(), "purpose": "fixed_known_data_regression",
@@ -124,11 +131,12 @@ class Benchmark:
             "resources": resources, "pricing": self.pricing,
             "model_settings": {model: self.settings(model).model_dump() for model in models}}
         experiment["sha256"] = fingerprint(experiment)
-        frozen_write(marker, experiment)
+        write_frozen(marker, experiment)
         return experiment
 
     def validate(self):
         value = read(self.work / "experiment.json")
+        self.source = EpisodeRepository(self.inputs)
         if fingerprint({k: v for k, v in value.items() if k != "sha256"}) != value["sha256"]:
             raise ValueError("Benchmark manifest changed")
         if (value["plan_sha256"] != file_hash(self.plan_path)
@@ -153,21 +161,22 @@ class Benchmark:
         if started_path.exists():
             raise RuntimeError("Interrupted episode requires receipt inspection before resuming: " + episode_id)
         source = self.source.source(episode_id)
-        media, references = self.media(episode_id), fetch(source.task_code, self.inputs)
+        media = self.artifacts.media(episode_id)
+        references = fetch(source.task_code, self.inputs, self.plan["resource_base"])
         builder = PromptBuilder(PromptBundle(**frozen["configuration"]["prompts"]), image_input)
         profile = profile_for(references, frozen["configuration"]["profiles"])
         audit = frozen["input_audit"][episode_id]
-        for name, value in (("task", builder.review(self.inputs, references, profile, media)),
-                            ("quality", builder.quality(self.inputs, media))):
-            if fingerprint(value) != audit[name + "_messages_sha256"]:
-                raise ValueError("Model input changed")
+        messages = {"task": builder.review(self.inputs, references, profile, media),
+                    "quality": builder.quality(self.inputs, media)}
+        if self.audit(source, media, references, messages) != audit:
+            raise ValueError("Model input changed")
         write(started_path, result)
         stage, started, waited = "source", time.monotonic(), gateway.wait_s
         def progress(value):
             nonlocal stage
             stage = value
         context = {**result, "task_code": source.task_code, "stage": "task"}
-        # GT is joined only by the report. The frozen original 68/30 split is preserved.
+        # GT is joined only by the report; the frozen split is preserved.
         try:
             ReviewPipeline(gateway, builder).execute(self.inputs, references, profile, media,
                                                       context, progress, result)
@@ -180,6 +189,8 @@ class Benchmark:
         return result
 
     def run(self, limit=None):
+        if limit is not None and limit < 1:
+            raise ValueError("Limit must be positive")
         frozen = self.validate()
         ids = sorted(self.source.records())[:limit]
         def worker(model):

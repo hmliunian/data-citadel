@@ -25,6 +25,15 @@ def write(path: Path, value):
         os.unlink(temporary)
 
 
+def write_frozen(path: Path, value):
+    """Publish immutable content, accepting only an identical previous write."""
+    try:
+        write(path, value)
+    except FileExistsError:
+        if read(path) != value:
+            raise ValueError("Frozen content changed: " + str(path))
+
+
 def fingerprint(value):
     return hashlib.sha256(json.dumps(value, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
 

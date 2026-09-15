@@ -46,7 +46,7 @@ check:
     uv run --locked python -m ruff check citadel citadel_client scripts tests
     git diff --check
 
-# Fixed-input, seven-model regression benchmark (run sends real Qwen requests).
+# Prepare independent inputs or run a fixed regression (run sends real Qwen requests).
 benchmark *args:
     uv run --locked python scripts/benchmark.py "$@"
 

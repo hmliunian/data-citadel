@@ -44,6 +44,7 @@ ssh -N -L 8770:127.0.0.1:8770 xuran-5090-7f
 config/
   server.toml           # 服务地址、队列并发、工作目录、注册数据集
   models.toml           # Qwen 模型、请求参数、超时与尝试次数
+  benchmark.toml        # 评测数据集、输出目录、候选模型及价格快照
   tasks.json            # 每类任务的成功条件与坏例边界
   prompts/
     review_system.txt   # 任务审核 system prompt
@@ -59,7 +60,7 @@ citadel/
   __main__.py           # server 和本地数据清单准备入口
 citadel_client/         # 仅依赖 HTTP 的 Python SDK 与 CLI
 gui/                    # HTML/CSS 与浏览器 ES modules
-scripts/                # 工具安装、开发启动
+scripts/                # 工具安装、开发启动、评测与报告、工程规则检查
 tests/                  # 假模型测试及可选浏览器测试
 justfile
 pyproject.toml
@@ -146,6 +147,45 @@ CLI 支持 `preview 记录ID --wait`、`review 记录ID --wait`、`batch --limit
 `artifacts/server/` 保存任务数据库；每个 run 下保存 `manifest.json`、`snapshots/`、`media/`、`resources/`、`calls/`、`results/` 和 `freeze.json`。结果与快照原子发布，不覆盖历史。模型请求记录中的图片仅保留摘要和长度。
 
 GT 仅参与数据划分和结果评测，不进入模型输入。开发集全部处理且无执行错误后才能冻结；冻结配置或参考资源变化时不能继续使用该留出集。已看过的记录不能再宣称为新的独立测试集。
+
+## 独立模型评测
+
+`config/benchmark.toml` 指定只读 `dataset` 和新的 `output` 目录。路径相对本项目根目录解析，也接受绝对路径。
+每轮使用 `artifacts/experiments/<实验名>/`；不引用旧服务实验，也不复制源码快照。
+
+```bash
+# 从原始数据准备清单、媒体和任务资源，冻结两类请求；不调用 Qwen
+just benchmark prepare
+
+# 发送真实 Qwen 请求；需单独配置凭据
+just benchmark run
+
+# 只读回执统计；不调用模型
+just benchmark-report --work artifacts/experiments/model_benchmark
+```
+
+其他计划用 `just benchmark --plan config/其他评测.toml prepare` / `run`。
+准备阶段需要可读的 MCAP、下载回执和任务标注，以及任务资源接口；媒体逐条处理，复用服务的解码、采样与夹爪处理。
+完成资源获取后，缓存和请求摘要均归本轮实验所有：
+
+```text
+artifacts/experiments/<实验名>/
+  source/               # manifest.json、media/、resources/；原始 MCAP 保留原位
+  preparation.json      # 准备阶段固定的计划、代码、prompt、规则与价格
+  inputs/               # 每条任务/画质请求的脱敏摘要与输入哈希
+  experiment.json       # 准备完成后的不可变实验协议
+  models/<模型>/
+    calls/              # 每次请求及供应商响应/错误
+    results/            # 最终结果和 started 标记
+```
+
+准备中断后可用相同计划继续，已完成输入须校验一致；修改数据、代码、prompt 或计划时使用新的输出目录。
+`prepare` 与 `run` 共用目录锁，防止两个进程同时处理同一实验。运行前和每条调用前核验冻结协议及输入；
+已有结果原样复用，存在 started 标记而没有最终结果时停止，先核查回执，避免自动重复付费。
+审核仍使用共用 `ReviewPipeline` 的任务与画质两次调用，GT 仅在离线报告中关联。
+
+旧 `input_run` 计划使用其记录的 Git 版本继续运行；新执行器不接管旧实验目录。
+已保存的旧回执仍可用 `benchmark-report --work 原实验目录` 离线复算，已有报告不覆盖。
 
 ## 开发产物
 
