@@ -26,6 +26,9 @@ just dev
 | `just test` | 单元、模型适配器、服务与 API 测试 |
 | `just check` | 源码位置、Python 导入边界、Ruff 与 Git 空白检查 |
 | `just test-gui` | 使用 Firefox/geckodriver 的浏览器联调，模型为假客户端 |
+| `just benchmark prepare` | 从原始数据准备并冻结模型对比输入；不调用模型 |
+| `just benchmark run` | 执行配置中的真实模型评测，复用已完成结果 |
+| `just benchmark-report --work 实验目录` | 从本地回执复算费用与效果；不调用模型 |
 
 不设置 PATH 时，可以将上述 `just` 换成 `.tools/bin/just`。已搬移的旧虚拟环境可运行 `just setup --reinstall` 修复命令入口。添加依赖使用 `uv add 包名` / `uv add --dev 包名`，提交 `pyproject.toml` 和 `uv.lock`；日常启动不会自动更新锁文件。
 
@@ -62,6 +65,7 @@ citadel_client/         # 仅依赖 HTTP 的 Python SDK 与 CLI
 gui/                    # HTML/CSS 与浏览器 ES modules
 scripts/                # 工具安装、开发启动、评测与报告、工程规则检查
 tests/                  # 假模型测试及可选浏览器测试
+docs/                   # 评测报告、错例分析与可复算统计
 justfile
 pyproject.toml
 uv.lock
@@ -94,7 +98,8 @@ flowchart LR
 5. 独立画质调用使用 `quality.txt` 和同一套三路时序帧；不接收任务参考图和夹爪信号。
 6. 合并两次响应，校验帧号、主镜头覆盖、三路画质、悬空时长和各检查项。输出通过、不通过、待复核或处理失败，并保存时间证据。
 
-这次重构保留原三份 prompt 文本、采样方法、动作边界和双调用流程。模型默认仍为 `qwen3.8-max-0902`、非思考模式，实测效果及已知误判见 [VALIDATION.md](VALIDATION.md)。本次工程测试不调用真实 Qwen，不能代替模型效果回归。
+这次重构保留原三份 prompt 文本、采样方法、动作边界和双调用流程。模型默认仍为 `qwen3.8-max-0902`、非思考模式。最新七模型费用与效果回归见 [benchmark 报告](docs/benchmarks/2026-09-15/README.md)及[错例分析](docs/benchmarks/2026-09-15/analysis.md)，此前的验证记录见 [VALIDATION.md](VALIDATION.md)。普通工程测试使用假客户端；真实模型试验单独执行并记录范围、用量和结果。
+历史报告保留发布时的协议与命令，重构分支上的读取和复算方法见[项目文档](docs/README.md)。
 
 抓取成功要求基本抓取后受控悬空约 2 秒，末态仍悬空；允许自由位置、路径、角度、调整和换手。当前 0.2 秒容差仍是待校准参数。触觉没有单位标定，不能单凭力值证明悬空或失败；缺失信号不补零。
 

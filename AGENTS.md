@@ -30,6 +30,7 @@
 | 配置、任务规则和自然语言 prompt | `config/`，prompt 在 `config/prompts/` |
 | 需要保留、复跑的工具与实验脚本 | `scripts/`，纳入 Git |
 | 测试代码与固定测试素材 | `tests/` |
+| 评测说明、错例分析与可复算统计 | `docs/` |
 | 测试输出、一次性调试文件 | `.cache/tests/`、`.cache/gui-tests/`、`.cache/scratch/` |
 | 服务运行数据 | 默认 `artifacts/server/`，部署路径通过服务配置指定 |
 | 新实验结果 | `artifacts/experiments/<实验名>/` |

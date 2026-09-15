@@ -1,0 +1,1197 @@
+{
+  "experiment_sha256": "83400e8ddc0791479440e31b30f767a4a8c1be7ff873996c2951c14e893109db",
+  "reporter_sha256": "e105ca08dcd33075be94e9498c3f3b1663dbcc782d4a6f05844210c0d634e90e",
+  "state": "finished",
+  "models": [
+    {
+      "model": "qwen3.8-max-0902",
+      "total": 98,
+      "labeled": 98,
+      "completed": 95,
+      "needs_review": 2,
+      "failed": 1,
+      "not_run": 0,
+      "matched": 88,
+      "false_accept": 3,
+      "false_reject": 4,
+      "coverage": 0.9693877551020408,
+      "accuracy_on_completed": 0.9263157894736842,
+      "match_rate": 0.8979591836734694,
+      "match_rate_wilson95": [
+        0.8222723377188418,
+        0.9436239966741063
+      ],
+      "positive_pass": 14,
+      "positive_total": 20,
+      "negative_reject": 74,
+      "balanced_match_rate": 0.8243589743589743,
+      "negative_total": 78,
+      "calls": 196,
+      "retries": 0,
+      "prompt_tokens": 3216387,
+      "completion_tokens": 130020,
+      "total_tokens": 3346407,
+      "cached_tokens": 224512,
+      "unknown_usage_calls": 0,
+      "unknown_cache_price_calls": 0,
+      "list_cny": 43.277364,
+      "cache_adjusted_known_cny": 40.919988,
+      "mean_cny_per_episode": 0.4416057551020408,
+      "mean_cny_per_matched": 0.49178822727272725,
+      "valid_latency_n": 97,
+      "api_p50_s": 26.594331041909754,
+      "api_p95_s": 30.357793389167632,
+      "returned_models": [
+        "qwen3.8-max-0902"
+      ],
+      "reasoning_response_calls": 0,
+      "response_formats": [
+        "json_schema"
+      ],
+      "failures_by_stage": {
+        "evidence": 1
+      },
+      "by_reason": {
+        "correct": {
+          "total": 20,
+          "labeled": 20,
+          "completed": 18,
+          "needs_review": 2,
+          "failed": 0,
+          "not_run": 0,
+          "matched": 14,
+          "false_accept": 0,
+          "false_reject": 4,
+          "coverage": 0.9,
+          "accuracy_on_completed": 0.7777777777777778
+        },
+        "其他问题": {
+          "total": 24,
+          "labeled": 24,
+          "completed": 23,
+          "needs_review": 0,
+          "failed": 1,
+          "not_run": 0,
+          "matched": 23,
+          "false_accept": 0,
+          "false_reject": 0,
+          "coverage": 0.9583333333333334,
+          "accuracy_on_completed": 1.0
+        },
+        "动作不完整": {
+          "total": 5,
+          "labeled": 5,
+          "completed": 5,
+          "needs_review": 0,
+          "failed": 0,
+          "not_run": 0,
+          "matched": 5,
+          "false_accept": 0,
+          "false_reject": 0,
+          "coverage": 1.0,
+          "accuracy_on_completed": 1.0
+        },
+        "反复重试": {
+          "total": 10,
+          "labeled": 10,
+          "completed": 10,
+          "needs_review": 0,
+          "failed": 0,
+          "not_run": 0,
+          "matched": 10,
+          "false_accept": 0,
+          "false_reject": 0,
+          "coverage": 1.0,
+          "accuracy_on_completed": 1.0
+        },
+        "画面模糊": {
+          "total": 10,
+          "labeled": 10,
+          "completed": 10,
+          "needs_review": 0,
+          "failed": 0,
+          "not_run": 0,
+          "matched": 10,
+          "false_accept": 0,
+          "false_reject": 0,
+          "coverage": 1.0,
+          "accuracy_on_completed": 1.0
+        },
+        "采集内容不符合要求": {
+          "total": 29,
+          "labeled": 29,
+          "completed": 29,
+          "needs_review": 0,
+          "failed": 0,
+          "not_run": 0,
+          "matched": 26,
+          "false_accept": 3,
+          "false_reject": 0,
+          "coverage": 1.0,
+          "accuracy_on_completed": 0.896551724137931
+        }
+      },
+      "by_split": {
+        "development": {
+          "total": 68,
+          "labeled": 68,
+          "completed": 67,
+          "needs_review": 1,
+          "failed": 0,
+          "not_run": 0,
+          "matched": 63,
+          "false_accept": 2,
+          "false_reject": 2,
+          "coverage": 0.9852941176470589,
+          "accuracy_on_completed": 0.9402985074626866
+        },
+        "holdout": {
+          "total": 30,
+          "labeled": 30,
+          "completed": 28,
+          "needs_review": 1,
+          "failed": 1,
+          "not_run": 0,
+          "matched": 25,
+          "false_accept": 1,
+          "false_reject": 2,
+          "coverage": 0.9333333333333333,
+          "accuracy_on_completed": 0.8928571428571429
+        }
+      },
+      "by_stage": {
+        "task": {
+          "calls": 98,
+          "list_cny": 29.93088,
+          "total_tokens": 2289526
+        },
+        "quality": {
+          "calls": 98,
+          "list_cny": 13.346484,
+          "total_tokens": 1056881
+        }
+      }
+    },
+    {
+      "model": "qwen3.7-plus-2026-05-26",
+      "total": 98,
+      "labeled": 98,
+      "completed": 86,
+      "needs_review": 5,
+      "failed": 7,
+      "not_run": 0,
+      "matched": 69,
+      "false_accept": 17,
+      "false_reject": 0,
+      "coverage": 0.8775510204081632,
+      "accuracy_on_completed": 0.8023255813953488,
+      "match_rate": 0.7040816326530612,
+      "match_rate_wilson95": [
+        0.6073991576853616,
+        0.785368193285381
+      ],
+      "positive_pass": 16,
+      "positive_total": 20,
+      "negative_reject": 53,
+      "balanced_match_rate": 0.7397435897435898,
+      "negative_total": 78,
+      "calls": 196,
+      "retries": 1,
+      "prompt_tokens": 3085415,
+      "completion_tokens": 141867,
+      "total_tokens": 3227282,
+      "cached_tokens": 35712,
+      "unknown_usage_calls": 1,
+      "unknown_cache_price_calls": 0,
+      "list_cny": 7.305766,
+      "cache_adjusted_known_cny": 7.2486268,
+      "mean_cny_per_episode": 0.07454863265306122,
+      "mean_cny_per_matched": 0.10588066666666666,
+      "valid_latency_n": 91,
+      "api_p50_s": 30.833640347700566,
+      "api_p95_s": 36.05780605785549,
+      "returned_models": [
+        "qwen3.7-plus-2026-05-26"
+      ],
+      "reasoning_response_calls": 0,
+      "response_formats": [
+        "json_object"
+      ],
+      "failures_by_stage": {
+        "evidence": 6,
+        "model": 1
+      },
+      "by_reason": {
+        "correct": {
+          "total": 20,
+          "labeled": 20,
+          "completed": 16,
+          "needs_review": 3,
+          "failed": 1,
+          "not_run": 0,
+          "matched": 16,
+          "false_accept": 0,
+          "false_reject": 0,
+          "coverage": 0.8,
+          "accuracy_on_completed": 1.0
+        },
+        "其他问题": {
+          "total": 24,
+          "labeled": 24,
+          "completed": 22,
+          "needs_review": 0,
+          "failed": 2,
+          "not_run": 0,
+          "matched": 22,
+          "false_accept": 0,
+          "false_reject": 0,
+          "coverage": 0.9166666666666666,
+          "accuracy_on_completed": 1.0
+        },
+        "动作不完整": {
+          "total": 5,
+          "labeled": 5,
+          "completed": 3,
+          "needs_review": 1,
+          "failed": 1,
+          "not_run": 0,
+          "matched": 0,
+          "false_accept": 3,
+          "false_reject": 0,
+          "coverage": 0.6,
+          "accuracy_on_completed": 0.0
+        },
+        "反复重试": {
+          "total": 10,
+          "labeled": 10,
+          "completed": 10,
+          "needs_review": 0,
+          "failed": 0,
+          "not_run": 0,
+          "matched": 6,
+          "false_accept": 4,
+          "false_reject": 0,
+          "coverage": 1.0,
+          "accuracy_on_completed": 0.6
+        },
+        "画面模糊": {
+          "total": 10,
+          "labeled": 10,
+          "completed": 9,
+          "needs_review": 0,
+          "failed": 1,
+          "not_run": 0,
+          "matched": 9,
+          "false_accept": 0,
+          "false_reject": 0,
+          "coverage": 0.9,
+          "accuracy_on_completed": 1.0
+        },
+        "采集内容不符合要求": {
+          "total": 29,
+          "labeled": 29,
+          "completed": 26,
+          "needs_review": 1,
+          "failed": 2,
+          "not_run": 0,
+          "matched": 16,
+          "false_accept": 10,
+          "false_reject": 0,
+          "coverage": 0.896551724137931,
+          "accuracy_on_completed": 0.6153846153846154
+        }
+      },
+      "by_split": {
+        "development": {
+          "total": 68,
+          "labeled": 68,
+          "completed": 62,
+          "needs_review": 3,
+          "failed": 3,
+          "not_run": 0,
+          "matched": 48,
+          "false_accept": 14,
+          "false_reject": 0,
+          "coverage": 0.9117647058823529,
+          "accuracy_on_completed": 0.7741935483870968
+        },
+        "holdout": {
+          "total": 30,
+          "labeled": 30,
+          "completed": 24,
+          "needs_review": 2,
+          "failed": 4,
+          "not_run": 0,
+          "matched": 21,
+          "false_accept": 3,
+          "false_reject": 0,
+          "coverage": 0.8,
+          "accuracy_on_completed": 0.875
+        }
+      },
+      "by_stage": {
+        "task": {
+          "calls": 99,
+          "list_cny": 5.125354,
+          "total_tokens": 2210540
+        },
+        "quality": {
+          "calls": 97,
+          "list_cny": 2.180412,
+          "total_tokens": 1016742
+        }
+      }
+    },
+    {
+      "model": "qwen3.8-flash",
+      "total": 98,
+      "labeled": 98,
+      "completed": 51,
+      "needs_review": 4,
+      "failed": 43,
+      "not_run": 0,
+      "matched": 45,
+      "false_accept": 3,
+      "false_reject": 3,
+      "coverage": 0.5204081632653061,
+      "accuracy_on_completed": 0.8823529411764706,
+      "match_rate": 0.45918367346938777,
+      "match_rate_wilson95": [
+        0.36392694572948114,
+        0.5575195840763703
+      ],
+      "positive_pass": 7,
+      "positive_total": 20,
+      "negative_reject": 38,
+      "balanced_match_rate": 0.41858974358974355,
+      "negative_total": 78,
+      "calls": 196,
+      "retries": 0,
+      "prompt_tokens": 3096213,
+      "completion_tokens": 122127,
+      "total_tokens": 3218340,
+      "cached_tokens": 217344,
+      "unknown_usage_calls": 0,
+      "unknown_cache_price_calls": 0,
+      "list_cny": 2.8067133,
+      "cache_adjusted_known_cny": 2.6545725,
+      "mean_cny_per_episode": 0.028639931632653062,
+      "mean_cny_per_matched": 0.06237140666666667,
+      "valid_latency_n": 55,
+      "api_p50_s": 20.42510100081563,
+      "api_p95_s": 25.050071400823068,
+      "returned_models": [
+        "qwen3.8-flash"
+      ],
+      "reasoning_response_calls": 0,
+      "response_formats": [
+        "json_object"
+      ],
+      "failures_by_stage": {
+        "evidence": 7,
+        "quality": 36
+      },
+      "by_reason": {
+        "correct": {
+          "total": 20,
+          "labeled": 20,
+          "completed": 10,
+          "needs_review": 2,
+          "failed": 8,
+          "not_run": 0,
+          "matched": 7,
+          "false_accept": 0,
+          "false_reject": 3,
+          "coverage": 0.5,
+          "accuracy_on_completed": 0.7
+        },
+        "其他问题": {
+          "total": 24,
+          "labeled": 24,
+          "completed": 12,
+          "needs_review": 0,
+          "failed": 12,
+          "not_run": 0,
+          "matched": 12,
+          "false_accept": 0,
+          "false_reject": 0,
+          "coverage": 0.5,
+          "accuracy_on_completed": 1.0
+        },
+        "动作不完整": {
+          "total": 5,
+          "labeled": 5,
+          "completed": 1,
+          "needs_review": 1,
+          "failed": 3,
+          "not_run": 0,
+          "matched": 0,
+          "false_accept": 1,
+          "false_reject": 0,
+          "coverage": 0.2,
+          "accuracy_on_completed": 0.0
+        },
+        "反复重试": {
+          "total": 10,
+          "labeled": 10,
+          "completed": 5,
+          "needs_review": 1,
+          "failed": 4,
+          "not_run": 0,
+          "matched": 4,
+          "false_accept": 1,
+          "false_reject": 0,
+          "coverage": 0.5,
+          "accuracy_on_completed": 0.8
+        },
+        "画面模糊": {
+          "total": 10,
+          "labeled": 10,
+          "completed": 8,
+          "needs_review": 0,
+          "failed": 2,
+          "not_run": 0,
+          "matched": 8,
+          "false_accept": 0,
+          "false_reject": 0,
+          "coverage": 0.8,
+          "accuracy_on_completed": 1.0
+        },
+        "采集内容不符合要求": {
+          "total": 29,
+          "labeled": 29,
+          "completed": 15,
+          "needs_review": 0,
+          "failed": 14,
+          "not_run": 0,
+          "matched": 14,
+          "false_accept": 1,
+          "false_reject": 0,
+          "coverage": 0.5172413793103449,
+          "accuracy_on_completed": 0.9333333333333333
+        }
+      },
+      "by_split": {
+        "development": {
+          "total": 68,
+          "labeled": 68,
+          "completed": 31,
+          "needs_review": 1,
+          "failed": 36,
+          "not_run": 0,
+          "matched": 28,
+          "false_accept": 2,
+          "false_reject": 1,
+          "coverage": 0.45588235294117646,
+          "accuracy_on_completed": 0.9032258064516129
+        },
+        "holdout": {
+          "total": 30,
+          "labeled": 30,
+          "completed": 20,
+          "needs_review": 3,
+          "failed": 7,
+          "not_run": 0,
+          "matched": 17,
+          "false_accept": 1,
+          "false_reject": 2,
+          "coverage": 0.6666666666666666,
+          "accuracy_on_completed": 0.85
+        }
+      },
+      "by_stage": {
+        "task": {
+          "calls": 98,
+          "list_cny": 1.9506659000000002,
+          "total_tokens": 2195434
+        },
+        "quality": {
+          "calls": 98,
+          "list_cny": 0.8560474,
+          "total_tokens": 1022906
+        }
+      }
+    },
+    {
+      "model": "qwen3-vl-plus-2025-12-19",
+      "total": 98,
+      "labeled": 98,
+      "completed": 68,
+      "needs_review": 28,
+      "failed": 2,
+      "not_run": 0,
+      "matched": 58,
+      "false_accept": 8,
+      "false_reject": 2,
+      "coverage": 0.6938775510204082,
+      "accuracy_on_completed": 0.8529411764705882,
+      "match_rate": 0.5918367346938775,
+      "match_rate_wilson95": [
+        0.4928537159343792,
+        0.683891592002455
+      ],
+      "positive_pass": 10,
+      "positive_total": 20,
+      "negative_reject": 48,
+      "balanced_match_rate": 0.5576923076923077,
+      "negative_total": 78,
+      "calls": 196,
+      "retries": 0,
+      "prompt_tokens": 3107388,
+      "completion_tokens": 149329,
+      "total_tokens": 3256717,
+      "cached_tokens": 0,
+      "unknown_usage_calls": 0,
+      "unknown_cache_price_calls": 0,
+      "list_cny": 4.600678,
+      "cache_adjusted_known_cny": 4.600678,
+      "mean_cny_per_episode": 0.04694569387755102,
+      "mean_cny_per_matched": 0.07932203448275862,
+      "valid_latency_n": 96,
+      "api_p50_s": 46.44105970882811,
+      "api_p95_s": 55.80067251890432,
+      "returned_models": [
+        "qwen3-vl-plus-2025-12-19"
+      ],
+      "reasoning_response_calls": 0,
+      "response_formats": [
+        "json_object"
+      ],
+      "failures_by_stage": {
+        "evidence": 2
+      },
+      "by_reason": {
+        "correct": {
+          "total": 20,
+          "labeled": 20,
+          "completed": 12,
+          "needs_review": 7,
+          "failed": 1,
+          "not_run": 0,
+          "matched": 10,
+          "false_accept": 0,
+          "false_reject": 2,
+          "coverage": 0.6,
+          "accuracy_on_completed": 0.8333333333333334
+        },
+        "其他问题": {
+          "total": 24,
+          "labeled": 24,
+          "completed": 22,
+          "needs_review": 1,
+          "failed": 1,
+          "not_run": 0,
+          "matched": 19,
+          "false_accept": 3,
+          "false_reject": 0,
+          "coverage": 0.9166666666666666,
+          "accuracy_on_completed": 0.8636363636363636
+        },
+        "动作不完整": {
+          "total": 5,
+          "labeled": 5,
+          "completed": 2,
+          "needs_review": 3,
+          "failed": 0,
+          "not_run": 0,
+          "matched": 2,
+          "false_accept": 0,
+          "false_reject": 0,
+          "coverage": 0.4,
+          "accuracy_on_completed": 1.0
+        },
+        "反复重试": {
+          "total": 10,
+          "labeled": 10,
+          "completed": 4,
+          "needs_review": 6,
+          "failed": 0,
+          "not_run": 0,
+          "matched": 2,
+          "false_accept": 2,
+          "false_reject": 0,
+          "coverage": 0.4,
+          "accuracy_on_completed": 0.5
+        },
+        "画面模糊": {
+          "total": 10,
+          "labeled": 10,
+          "completed": 10,
+          "needs_review": 0,
+          "failed": 0,
+          "not_run": 0,
+          "matched": 10,
+          "false_accept": 0,
+          "false_reject": 0,
+          "coverage": 1.0,
+          "accuracy_on_completed": 1.0
+        },
+        "采集内容不符合要求": {
+          "total": 29,
+          "labeled": 29,
+          "completed": 18,
+          "needs_review": 11,
+          "failed": 0,
+          "not_run": 0,
+          "matched": 15,
+          "false_accept": 3,
+          "false_reject": 0,
+          "coverage": 0.6206896551724138,
+          "accuracy_on_completed": 0.8333333333333334
+        }
+      },
+      "by_split": {
+        "development": {
+          "total": 68,
+          "labeled": 68,
+          "completed": 48,
+          "needs_review": 19,
+          "failed": 1,
+          "not_run": 0,
+          "matched": 43,
+          "false_accept": 4,
+          "false_reject": 1,
+          "coverage": 0.7058823529411765,
+          "accuracy_on_completed": 0.8958333333333334
+        },
+        "holdout": {
+          "total": 30,
+          "labeled": 30,
+          "completed": 20,
+          "needs_review": 9,
+          "failed": 1,
+          "not_run": 0,
+          "matched": 15,
+          "false_accept": 4,
+          "false_reject": 1,
+          "coverage": 0.6666666666666666,
+          "accuracy_on_completed": 0.75
+        }
+      },
+      "by_stage": {
+        "task": {
+          "calls": 98,
+          "list_cny": 3.248442,
+          "total_tokens": 2217600
+        },
+        "quality": {
+          "calls": 98,
+          "list_cny": 1.352236,
+          "total_tokens": 1039117
+        }
+      }
+    },
+    {
+      "model": "qwen3-vl-flash-2026-01-22",
+      "total": 98,
+      "labeled": 98,
+      "completed": 26,
+      "needs_review": 0,
+      "failed": 72,
+      "not_run": 0,
+      "matched": 24,
+      "false_accept": 0,
+      "false_reject": 2,
+      "coverage": 0.2653061224489796,
+      "accuracy_on_completed": 0.9230769230769231,
+      "match_rate": 0.24489795918367346,
+      "match_rate_wilson95": [
+        0.17044970160914977,
+        0.3385911096774219
+      ],
+      "positive_pass": 0,
+      "positive_total": 20,
+      "negative_reject": 24,
+      "balanced_match_rate": 0.15384615384615385,
+      "negative_total": 78,
+      "calls": 196,
+      "retries": 0,
+      "prompt_tokens": 3107388,
+      "completion_tokens": 189009,
+      "total_tokens": 3296397,
+      "cached_tokens": 0,
+      "unknown_usage_calls": 0,
+      "unknown_cache_price_calls": 0,
+      "list_cny": 0.7496217,
+      "cache_adjusted_known_cny": 0.7496217,
+      "mean_cny_per_episode": 0.007649201020408163,
+      "mean_cny_per_matched": 0.031234237499999998,
+      "valid_latency_n": 26,
+      "api_p50_s": 27.82988982112147,
+      "api_p95_s": 34.196582389762625,
+      "returned_models": [
+        "qwen3-vl-flash-2026-01-22"
+      ],
+      "reasoning_response_calls": 0,
+      "response_formats": [
+        "json_object"
+      ],
+      "failures_by_stage": {
+        "evidence": 72
+      },
+      "by_reason": {
+        "correct": {
+          "total": 20,
+          "labeled": 20,
+          "completed": 2,
+          "needs_review": 0,
+          "failed": 18,
+          "not_run": 0,
+          "matched": 0,
+          "false_accept": 0,
+          "false_reject": 2,
+          "coverage": 0.1,
+          "accuracy_on_completed": 0.0
+        },
+        "其他问题": {
+          "total": 24,
+          "labeled": 24,
+          "completed": 6,
+          "needs_review": 0,
+          "failed": 18,
+          "not_run": 0,
+          "matched": 6,
+          "false_accept": 0,
+          "false_reject": 0,
+          "coverage": 0.25,
+          "accuracy_on_completed": 1.0
+        },
+        "动作不完整": {
+          "total": 5,
+          "labeled": 5,
+          "completed": 3,
+          "needs_review": 0,
+          "failed": 2,
+          "not_run": 0,
+          "matched": 3,
+          "false_accept": 0,
+          "false_reject": 0,
+          "coverage": 0.6,
+          "accuracy_on_completed": 1.0
+        },
+        "反复重试": {
+          "total": 10,
+          "labeled": 10,
+          "completed": 2,
+          "needs_review": 0,
+          "failed": 8,
+          "not_run": 0,
+          "matched": 2,
+          "false_accept": 0,
+          "false_reject": 0,
+          "coverage": 0.2,
+          "accuracy_on_completed": 1.0
+        },
+        "画面模糊": {
+          "total": 10,
+          "labeled": 10,
+          "completed": 2,
+          "needs_review": 0,
+          "failed": 8,
+          "not_run": 0,
+          "matched": 2,
+          "false_accept": 0,
+          "false_reject": 0,
+          "coverage": 0.2,
+          "accuracy_on_completed": 1.0
+        },
+        "采集内容不符合要求": {
+          "total": 29,
+          "labeled": 29,
+          "completed": 11,
+          "needs_review": 0,
+          "failed": 18,
+          "not_run": 0,
+          "matched": 11,
+          "false_accept": 0,
+          "false_reject": 0,
+          "coverage": 0.3793103448275862,
+          "accuracy_on_completed": 1.0
+        }
+      },
+      "by_split": {
+        "development": {
+          "total": 68,
+          "labeled": 68,
+          "completed": 17,
+          "needs_review": 0,
+          "failed": 51,
+          "not_run": 0,
+          "matched": 16,
+          "false_accept": 0,
+          "false_reject": 1,
+          "coverage": 0.25,
+          "accuracy_on_completed": 0.9411764705882353
+        },
+        "holdout": {
+          "total": 30,
+          "labeled": 30,
+          "completed": 9,
+          "needs_review": 0,
+          "failed": 21,
+          "not_run": 0,
+          "matched": 8,
+          "false_accept": 0,
+          "false_reject": 1,
+          "coverage": 0.3,
+          "accuracy_on_completed": 0.8888888888888888
+        }
+      },
+      "by_stage": {
+        "task": {
+          "calls": 98,
+          "list_cny": 0.5316543,
+          "total_tokens": 2247192
+        },
+        "quality": {
+          "calls": 98,
+          "list_cny": 0.2179674,
+          "total_tokens": 1049205
+        }
+      }
+    },
+    {
+      "model": "qwen3.5-plus-2026-02-15",
+      "total": 98,
+      "labeled": 98,
+      "completed": 77,
+      "needs_review": 15,
+      "failed": 6,
+      "not_run": 0,
+      "matched": 63,
+      "false_accept": 13,
+      "false_reject": 1,
+      "coverage": 0.7857142857142857,
+      "accuracy_on_completed": 0.8181818181818182,
+      "match_rate": 0.6428571428571429,
+      "match_rate_wilson95": [
+        0.5442524878517956,
+        0.7306846578277244
+      ],
+      "positive_pass": 15,
+      "positive_total": 20,
+      "negative_reject": 48,
+      "balanced_match_rate": 0.6826923076923077,
+      "negative_total": 78,
+      "calls": 196,
+      "retries": 0,
+      "prompt_tokens": 3096409,
+      "completion_tokens": 121618,
+      "total_tokens": 3218027,
+      "cached_tokens": 0,
+      "unknown_usage_calls": 0,
+      "unknown_cache_price_calls": 0,
+      "list_cny": 3.0608936,
+      "cache_adjusted_known_cny": 3.0608936,
+      "mean_cny_per_episode": 0.031233608163265307,
+      "mean_cny_per_matched": 0.048585612698412696,
+      "valid_latency_n": 92,
+      "api_p50_s": 26.75659887539223,
+      "api_p95_s": 32.89481424004771,
+      "returned_models": [
+        "qwen3.5-plus-2026-02-15"
+      ],
+      "reasoning_response_calls": 0,
+      "response_formats": [
+        "json_object"
+      ],
+      "failures_by_stage": {
+        "evidence": 6
+      },
+      "by_reason": {
+        "correct": {
+          "total": 20,
+          "labeled": 20,
+          "completed": 16,
+          "needs_review": 4,
+          "failed": 0,
+          "not_run": 0,
+          "matched": 15,
+          "false_accept": 0,
+          "false_reject": 1,
+          "coverage": 0.8,
+          "accuracy_on_completed": 0.9375
+        },
+        "其他问题": {
+          "total": 24,
+          "labeled": 24,
+          "completed": 21,
+          "needs_review": 1,
+          "failed": 2,
+          "not_run": 0,
+          "matched": 15,
+          "false_accept": 6,
+          "false_reject": 0,
+          "coverage": 0.875,
+          "accuracy_on_completed": 0.7142857142857143
+        },
+        "动作不完整": {
+          "total": 5,
+          "labeled": 5,
+          "completed": 1,
+          "needs_review": 4,
+          "failed": 0,
+          "not_run": 0,
+          "matched": 0,
+          "false_accept": 1,
+          "false_reject": 0,
+          "coverage": 0.2,
+          "accuracy_on_completed": 0.0
+        },
+        "反复重试": {
+          "total": 10,
+          "labeled": 10,
+          "completed": 5,
+          "needs_review": 4,
+          "failed": 1,
+          "not_run": 0,
+          "matched": 4,
+          "false_accept": 1,
+          "false_reject": 0,
+          "coverage": 0.5,
+          "accuracy_on_completed": 0.8
+        },
+        "画面模糊": {
+          "total": 10,
+          "labeled": 10,
+          "completed": 10,
+          "needs_review": 0,
+          "failed": 0,
+          "not_run": 0,
+          "matched": 10,
+          "false_accept": 0,
+          "false_reject": 0,
+          "coverage": 1.0,
+          "accuracy_on_completed": 1.0
+        },
+        "采集内容不符合要求": {
+          "total": 29,
+          "labeled": 29,
+          "completed": 24,
+          "needs_review": 2,
+          "failed": 3,
+          "not_run": 0,
+          "matched": 19,
+          "false_accept": 5,
+          "false_reject": 0,
+          "coverage": 0.8275862068965517,
+          "accuracy_on_completed": 0.7916666666666666
+        }
+      },
+      "by_split": {
+        "development": {
+          "total": 68,
+          "labeled": 68,
+          "completed": 51,
+          "needs_review": 11,
+          "failed": 6,
+          "not_run": 0,
+          "matched": 42,
+          "false_accept": 9,
+          "false_reject": 0,
+          "coverage": 0.75,
+          "accuracy_on_completed": 0.8235294117647058
+        },
+        "holdout": {
+          "total": 30,
+          "labeled": 30,
+          "completed": 26,
+          "needs_review": 4,
+          "failed": 0,
+          "not_run": 0,
+          "matched": 21,
+          "false_accept": 4,
+          "false_reject": 1,
+          "coverage": 0.8666666666666667,
+          "accuracy_on_completed": 0.8076923076923077
+        }
+      },
+      "by_stage": {
+        "task": {
+          "calls": 98,
+          "list_cny": 2.146644,
+          "total_tokens": 2191600
+        },
+        "quality": {
+          "calls": 98,
+          "list_cny": 0.9142496,
+          "total_tokens": 1026427
+        }
+      }
+    },
+    {
+      "model": "qwen-vl-max",
+      "total": 98,
+      "labeled": 98,
+      "completed": 82,
+      "needs_review": 16,
+      "failed": 0,
+      "not_run": 0,
+      "matched": 62,
+      "false_accept": 18,
+      "false_reject": 2,
+      "coverage": 0.8367346938775511,
+      "accuracy_on_completed": 0.7560975609756098,
+      "match_rate": 0.6326530612244898,
+      "match_rate_wilson95": [
+        0.5338875533526599,
+        0.7214112247783229
+      ],
+      "positive_pass": 13,
+      "positive_total": 20,
+      "negative_reject": 49,
+      "balanced_match_rate": 0.639102564102564,
+      "negative_total": 78,
+      "calls": 196,
+      "retries": 0,
+      "prompt_tokens": 3020168,
+      "completion_tokens": 158705,
+      "total_tokens": 3178873,
+      "cached_tokens": 9728,
+      "unknown_usage_calls": 0,
+      "unknown_cache_price_calls": 0,
+      "list_cny": 5.4670888,
+      "cache_adjusted_known_cny": 5.45463696,
+      "mean_cny_per_episode": 0.05578662040816326,
+      "mean_cny_per_matched": 0.08817885161290323,
+      "valid_latency_n": 98,
+      "api_p50_s": 45.32837098254822,
+      "api_p95_s": 54.49190853759646,
+      "returned_models": [
+        "qwen-vl-max"
+      ],
+      "reasoning_response_calls": 0,
+      "response_formats": [
+        "json_object"
+      ],
+      "failures_by_stage": {},
+      "by_reason": {
+        "correct": {
+          "total": 20,
+          "labeled": 20,
+          "completed": 15,
+          "needs_review": 5,
+          "failed": 0,
+          "not_run": 0,
+          "matched": 13,
+          "false_accept": 0,
+          "false_reject": 2,
+          "coverage": 0.75,
+          "accuracy_on_completed": 0.8666666666666667
+        },
+        "其他问题": {
+          "total": 24,
+          "labeled": 24,
+          "completed": 19,
+          "needs_review": 5,
+          "failed": 0,
+          "not_run": 0,
+          "matched": 16,
+          "false_accept": 3,
+          "false_reject": 0,
+          "coverage": 0.7916666666666666,
+          "accuracy_on_completed": 0.8421052631578947
+        },
+        "动作不完整": {
+          "total": 5,
+          "labeled": 5,
+          "completed": 2,
+          "needs_review": 3,
+          "failed": 0,
+          "not_run": 0,
+          "matched": 1,
+          "false_accept": 1,
+          "false_reject": 0,
+          "coverage": 0.4,
+          "accuracy_on_completed": 0.5
+        },
+        "反复重试": {
+          "total": 10,
+          "labeled": 10,
+          "completed": 10,
+          "needs_review": 0,
+          "failed": 0,
+          "not_run": 0,
+          "matched": 3,
+          "false_accept": 7,
+          "false_reject": 0,
+          "coverage": 1.0,
+          "accuracy_on_completed": 0.3
+        },
+        "画面模糊": {
+          "total": 10,
+          "labeled": 10,
+          "completed": 10,
+          "needs_review": 0,
+          "failed": 0,
+          "not_run": 0,
+          "matched": 10,
+          "false_accept": 0,
+          "false_reject": 0,
+          "coverage": 1.0,
+          "accuracy_on_completed": 1.0
+        },
+        "采集内容不符合要求": {
+          "total": 29,
+          "labeled": 29,
+          "completed": 26,
+          "needs_review": 3,
+          "failed": 0,
+          "not_run": 0,
+          "matched": 19,
+          "false_accept": 7,
+          "false_reject": 0,
+          "coverage": 0.896551724137931,
+          "accuracy_on_completed": 0.7307692307692307
+        }
+      },
+      "by_split": {
+        "development": {
+          "total": 68,
+          "labeled": 68,
+          "completed": 58,
+          "needs_review": 10,
+          "failed": 0,
+          "not_run": 0,
+          "matched": 45,
+          "false_accept": 12,
+          "false_reject": 1,
+          "coverage": 0.8529411764705882,
+          "accuracy_on_completed": 0.7758620689655172
+        },
+        "holdout": {
+          "total": 30,
+          "labeled": 30,
+          "completed": 24,
+          "needs_review": 6,
+          "failed": 0,
+          "not_run": 0,
+          "matched": 17,
+          "false_accept": 6,
+          "false_reject": 1,
+          "coverage": 0.8,
+          "accuracy_on_completed": 0.7083333333333334
+        }
+      },
+      "by_stage": {
+        "task": {
+          "calls": 98,
+          "list_cny": 3.7103432,
+          "total_tokens": 2137091
+        },
+        "quality": {
+          "calls": 98,
+          "list_cny": 1.7567456000000001,
+          "total_tokens": 1041782
+        }
+      }
+    }
+  ],
+  "audit": {
+    "requests_checked": 1372,
+    "identical_messages_per_episode_and_stage": true,
+    "result_scope_and_provenance_verified": true
+  },
+  "started_at": "2026-09-15T05:39:36.607886+00:00",
+  "finished_at": "2026-09-15T06:57:02.264849+00:00"
+}
