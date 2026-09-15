@@ -4,7 +4,7 @@ import json
 import pytest
 
 from citadel.infrastructure.files import fingerprint, read, write
-from scripts.benchmark_report import audit_receipts, publish
+from scripts.benchmark_report import audit_receipts, publish, schema_failure
 
 
 @pytest.fixture
@@ -77,3 +77,14 @@ def test_publish_rejects_partial_scope(tmp_path, report_case):
     next((work / "models/fake/results").glob("*.json")).unlink()
     with pytest.raises(ValueError, match="still running"):
         publish(work, tmp_path / "docs")
+
+
+def test_schema_diagnosis_keeps_extra_fields_and_does_not_rescore(tmp_path, answer):
+    answer.pop("quality_by_camera")
+    answer["hold"]["duration_s"] = 2
+    folder = tmp_path / "models/fake/calls/example"
+    write(folder / "response.json", {"body": {"choices": [{"message": {"content": json.dumps(answer)}}]}})
+    result = {"status": "failed", "label": None, "error": {"stage": "evidence", "type": "ValidationError"},
+              "model_call": {"call_path": "calls/example"}}
+    assert schema_failure(tmp_path, "fake", result) == "model_call: hold.duration_s / extra_forbidden"
+    assert result["status"] == "failed" and result["label"] is None

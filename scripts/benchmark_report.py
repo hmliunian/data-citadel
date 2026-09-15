@@ -7,7 +7,10 @@ import math
 from pathlib import Path
 import statistics
 
+from pydantic import ValidationError
+
 from citadel.application.experiments import counts
+from citadel.domain.models import QualityReview, Review
 from citadel.infrastructure.files import fingerprint, read
 
 RESULT_GLOB = "[0-9a-f]" * 32 + ".json"
@@ -74,6 +77,24 @@ def call_rows(work, model, price):
     return sorted(rows, key=lambda row: (row["started_at"] or "", row["call_id"]))
 
 
+def schema_failure(work, model, result):
+    """Explain failed output contracts offline, without repairing or rescoring responses."""
+    if result.get("error", {}).get("stage") not in ("quality", "evidence"):
+        return None
+    details = []
+    for key, schema in (("model_call", Review), ("quality_call", QualityReview)):
+        if key not in result:
+            continue
+        path = work / "models" / model / result[key]["call_path"] / "response.json"
+        content = read(path)["body"]["choices"][0]["message"]["content"]
+        try:
+            schema.model_validate_json(content)
+        except ValidationError as exc:
+            details.extend(f"{key}: {'.'.join(map(str, error['loc']))} / {error['type']}"
+                           for error in exc.errors(include_input=False, include_url=False))
+    return "; ".join(details) or None
+
+
 def summarize(work):
     frozen = read(work / "experiment.json")
     manifest = frozen["manifest"]
@@ -93,6 +114,7 @@ def summarize(work):
                    "status": result.get("status", "not_run"), "label": result.get("label"),
                    "error_stage": result.get("error", {}).get("stage"),
                    "error_type": result.get("error", {}).get("type"), "result_id": result.get("result_id"),
+                   "schema_failure": schema_failure(work, model, result),
                    "calls": len(attempts), "list_cny": sum(r["list_cny"] or 0 for r in attempts),
                    "unknown_cost_calls": sum(r["list_cny"] is None for r in attempts),
                    "api_elapsed_s": api_time, "wall_elapsed_s": result.get("elapsed_s"),
@@ -325,10 +347,12 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--work", type=Path, default=Path("artifacts/experiments/model_benchmark_20260915"))
     parser.add_argument("--publish", type=Path)
+    parser.add_argument("--json", action="store_true", help="Print the complete offline summary")
     args = parser.parse_args()
     summary = publish(args.work, args.publish) if args.publish else summarize(args.work)[0]
-    print(json.dumps([{key: row[key] for key in ("model", "matched", "failed", "not_run", "calls", "list_cny")}
-                     for row in summary["models"]], ensure_ascii=False))
+    value = summary if args.json else [{key: row[key] for key in
+             ("model", "matched", "failed", "not_run", "calls", "list_cny")} for row in summary["models"]]
+    print(json.dumps(value, ensure_ascii=False))
 
 
 if __name__ == "__main__":
