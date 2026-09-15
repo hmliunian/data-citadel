@@ -1,0 +1,28 @@
+# Fixed regression benchmark; no prompt tuning or independent holdout claim.
+input_run = "artifacts/visibility_v1"
+output = "artifacts/benchmark_20260915"
+config_root = "config"
+pricing = "config/prices/cny_20260915.json"
+resource_base = "http://172.100.11.189:8001"
+base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+models = [
+  "qwen3.8-max-0902",
+  "qwen3.7-plus-2026-05-26",
+  "qwen3.8-flash",
+  "qwen3-vl-plus-2025-12-19",
+  "qwen3-vl-flash-2026-01-22",
+  "qwen3.5-plus-2026-02-15",
+  "qwen-vl-max",
+]
+# One serial worker per model; different models run concurrently.
+temperature = 0.0
+enable_thinking = false
+max_tokens = 5000
+timeout_s = 180.0
+connect_timeout_s = 15.0
+attempts = 2
+# Proactive pacing uses 80% of the documented TPM and measured usage.
+default_tpm = 1000000
+[model_tpm]
+"qwen3-vl-plus-2025-12-19" = 100000
+"qwen3-vl-flash-2026-01-22" = 100000
