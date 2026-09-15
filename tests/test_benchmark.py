@@ -12,6 +12,31 @@ from scripts.benchmark import Benchmark, PacedGateway
 from scripts.benchmark_report import price_usage, summarize
 
 
+def test_prepared_inputs_survive_config_snapshot_round_trip(tmp_path, service_case, monkeypatch):
+    run, fake = service_case
+    benchmark = Benchmark.__new__(Benchmark)
+    benchmark.work, benchmark.inputs = tmp_path / "benchmark", run.artifacts.work
+    benchmark.source, benchmark.config, benchmark.pricing = run.source, run.configuration, {}
+    benchmark.plan = {"models": ["fake"], "resource_base": "https://example.invalid"}
+    benchmark.plan_path = tmp_path / "plan.toml"
+    benchmark.plan_path.write_text('models = ["fake"]')
+    media = {}
+    for episode_id in run.source.records():
+        source = run.source.source(episode_id)
+        item = run.reviews.media.prepare(source, run.source.manifest["sampling"])
+        item["signature"] = {**run.source.manifest["sampling"], "mcap_sha256": source.mcap_sha256}
+        item["gripper"] = {"sha256": "empty", "warnings": [], "channels": {}}
+        media[episode_id] = item
+    benchmark.media = lambda episode_id: copy.deepcopy(media[episode_id])
+    monkeypatch.setattr("scripts.benchmark.fetch", lambda *args: run.resources.get("DL-TEST"))
+    frozen = benchmark.prepare()
+    # Loading the saved snapshot is what a later, separate run process does.
+    saved = json.loads((benchmark.work / "experiment.json").read_text())
+    assert saved == frozen
+    result = benchmark.run_one("fake", sorted(media)[0], saved, PacedGateway(fake, 1_000_000))
+    assert result["status"] == "completed" and len(fake.requests) == 2
+
+
 @pytest.fixture
 def benchmark_case(tmp_path, service_case):
     run, fake = service_case

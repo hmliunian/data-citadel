@@ -84,7 +84,9 @@ class Benchmark:
             if fresh["sha256"] != cached["sha256"]:
                 raise ValueError("Current references differ from the input cache; prepare a new input run")
             resources[code] = cached["sha256"]
-        builder = PromptBuilder(PromptBundle.load(self.config.root), image_input)
+        snapshot = self.config.snapshot(self.source.manifest, self.plan["resource_base"]).data
+        snapshot.pop("model")
+        builder = PromptBuilder(PromptBundle(**snapshot["prompts"]), image_input)
         audit = {}
         for episode_id in sorted(self.source.records()):
             source = self.source.source(episode_id)
@@ -99,7 +101,7 @@ class Benchmark:
             for frame in media["frames"]:
                 image_input(self.inputs, frame)
             references = fetch(source.task_code, self.inputs)
-            profile = profile_for(references, json.loads((self.config.root / "tasks.json").read_text()))
+            profile = profile_for(references, snapshot["profiles"])
             task = builder.review(self.inputs, references, profile, media)
             quality = builder.quality(self.inputs, media)
             audit[episode_id] = {
@@ -112,8 +114,6 @@ class Benchmark:
             frozen_write(self.work / "inputs" / (episode_id + ".json"),
                          {"task": safe_messages(task), "quality": safe_messages(quality), **audit[episode_id]})
             print(json.dumps({"prepared": len(audit), "total": len(self.source.records())}), flush=True)
-        snapshot = self.config.snapshot(self.source.manifest, self.plan["resource_base"]).data
-        snapshot.pop("model")
         experiment = {
             "created_at": now(), "purpose": "fixed_known_data_regression",
             "plan": self.plan, "plan_sha256": file_hash(self.plan_path),
