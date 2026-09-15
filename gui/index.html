@@ -24,7 +24,7 @@
 <details><summary>实际模型输入预览（图片显示摘要）</summary><pre id="preview"></pre></details>
 <details><summary>模型调用记录、用量和原始响应</summary><pre id="trace"></pre></details>
 <div class="toolbar"><select id="history" aria-label="选择历史结果"></select><button id="compare">与当前结果比较</button></div>
-<div class="compare"><pre id="current-version"></pre><pre id="past-version"></pre></div>
+<div class="compare" id="versions" hidden><div><h3>当前结果</h3><pre id="current-version"></pre></div><div><h3>选中的历史结果</h3><pre id="past-version"></pre></div></div>
 </section>
 <section id="videos" hidden>
 <h2>三路拼接（每 1 秒采样）</h2><video id="stitched" controls preload="metadata"></video>

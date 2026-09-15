@@ -1,4 +1,4 @@
-import {$,state,names,labels,outcome} from "./state.js";
+import {$,state,names,labels,outcome,episodeLabel} from "./state.js";
 export function showMedia(media){
   state.media=media;$("videos").hidden=false;showGripper(media);
   for(const name of ["stitched","main","left_wrist","right_wrist"]){
@@ -47,7 +47,11 @@ export function showResult(result){
   $("conclusion").textContent=labels[result.label||result.status]||result.status;
   $("reason").textContent=result.reason||"";
   const row=state.rows.find(row=>row.episode_id===result.episode_id);
-  if(row)Object.assign(row,{label:result.label,status:result.status,result_id:result.result_id});
+  if(row){
+    Object.assign(row,{label:result.label,status:result.status,result_id:result.result_id});
+    const option=[...$("episode").options].find(option=>option.value===row.episode_id);
+    if(option)option.textContent=episodeLabel(row);
+  }
   const kind=outcome(row||{});
   $("comparison").textContent=(labels[kind]?labels[kind]+" · ":"")+"GT："+(labels[result.evaluation?.gt]||"无标签")+
     (result.evaluation?.gt_reason?" · GT原因："+result.evaluation.gt_reason:"");

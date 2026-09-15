@@ -8,3 +8,9 @@ export function outcome(row){
   if(row.gt==="correct"&&row.label==="incorrect")return "false_reject";
   return row.status==="needs_review"?"needs_review":null;
 }
+
+export function episodeLabel(row){
+  return row.task_code+" · "+row.episode_id.slice(0,10)+" · "+
+    (labels[outcome(row)] || labels[row.label || row.status])+" · "+
+    (row.split === "holdout" ? "留出集" : "开发集");
+}

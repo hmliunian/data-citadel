@@ -12,4 +12,4 @@ th:nth-child(-n+2),td:nth-child(-n+2){white-space:nowrap}
 .evidence figure{margin:0;min-width:280px;max-width:400px}.evidence img{width:100%;cursor:pointer;border-radius:6px}
 [hidden]{display:none!important}@media(max-width:720px){.cameras{grid-template-columns:1fr}body{padding:0 14px}}
 
-pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:500px;overflow:auto;font:13px monospace}input{font:inherit;padding:8px}details{margin:12px 0}a{color:#8ab7ff}.compare{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:500px;overflow:auto;font:13px monospace}details{margin:12px 0}a{color:#8ab7ff}.compare{display:grid;grid-template-columns:1fr 1fr;gap:12px}.compare>div{min-width:0}h3{font-size:14px}select{max-width:100%}@media(max-width:720px){.compare{grid-template-columns:1fr}}

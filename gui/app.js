@@ -1,5 +1,5 @@
 import {ApiClient} from "./api.js";
-import {$,state,labels,outcome} from "./state.js";
+import {$,state,labels,outcome,episodeLabel} from "./state.js";
 import {showMedia,showResult} from "./views.js";
 
 const api = new ApiClient();
@@ -40,7 +40,7 @@ async function loadHistory(id, token) {
 async function selectEpisode() {
   const token = ++selection, id = $("episode").value;
   state.result = null; state.media = null;
-  for (const name of ["result","videos","signals","debug"]) $(name).hidden = true;
+  for (const name of ["result","videos","signals","debug","versions"]) $(name).hidden = true;
   for (const name of ["preview","trace","current-version","past-version"]) $(name).textContent = "";
   for (const video of document.querySelectorAll("video")) {video.pause();video.removeAttribute("src");video.load();}
   $("review").textContent = "开始审核";
@@ -70,8 +70,7 @@ async function filterRows(preferred) {
   $("episode").replaceChildren();
   for (const row of state.rows.filter(row=>matches(row,$("filter").value))) {
     const option = document.createElement("option");option.value = row.episode_id;
-    option.textContent = row.task_code+" · "+row.episode_id.slice(0,10)+" · "+
-      (labels[outcome(row)] || labels[row.label || row.status])+" · "+(row.split === "holdout" ? "留出集" : "开发集");
+    option.textContent = episodeLabel(row);
     $("episode").append(option);
   }
   if ([...$("episode").options].some(option=>option.value === preferred)) $("episode").value = preferred;
@@ -131,6 +130,7 @@ $("episode").onchange = () => selectEpisode().catch(reportError);
 $("prepare").onclick = () => action(true);
 $("review").onclick = () => action(false);
 $("compare").onclick = () => {
+  $("versions").hidden = false;
   $("current-version").textContent = state.result ? format(state.result) : "当前配置尚未审核";
   $("past-version").textContent = format(history.find(value=>value.result_id === $("history").value));
 };
