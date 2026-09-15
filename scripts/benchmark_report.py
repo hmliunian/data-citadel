@@ -6,6 +6,7 @@ import json
 import math
 from pathlib import Path
 import statistics
+import shlex
 
 from pydantic import ValidationError
 
@@ -218,12 +219,17 @@ def number(value, digits=2):
     return "—" if value is None else f"{value:.{digits}f}"
 
 
-def markdown(summary, frozen):
+def markdown(summary, frozen, work, destination):
     models = sorted(summary["models"], key=lambda row: (-row["matched"], row["false_accept"], row["list_cny"]))
     best = models[0]
     frames = [row["frames"] for row in frozen["input_audit"].values()]
+    tasks = "、".join(sorted({row["task_code"] for row in frozen["manifest"]["episodes"].values()}))
+    splits = " / ".join(f"{name} {len(ids)}" for name, ids in frozen["manifest"]["splits"].items())
+    sampling = frozen["manifest"]["sampling"]
+    settings = frozen["model_settings"]
+    report_command = ".tools/bin/just benchmark-report --work " + shlex.quote(str(work))
     sections = [
-        "# 7 个 Qwen 模型的费用与审核效果 benchmark",
+        f"# {len(models)} 个模型的费用与审核效果 benchmark",
         f"本轮 {len(models)} 个模型各完成 {best['total']} 条固定数据的测试。按完整数据分母计算，"
         f"`{best['model']}` 命中最多，为 **{best['matched']}/{best['total']}"
         f"（{best['match_rate']:.1%}）**。这是当前 prompt、采样和双调用流程的回归结果。",
@@ -248,7 +254,8 @@ def markdown(summary, frozen):
                 r["cached_tokens"], number(r["list_cny"], 4), number(r["cache_adjusted_known_cny"], 4),
                 number(r["mean_cny_per_episode"], 4), r["unknown_usage_calls"]] for r in models]),
         f"全部模型有回执可计算的原价合计 **¥{sum(r['list_cny'] for r in models):.4f}**。"
-        "费用由真实 API usage × 2026-09-15 北京地域公开按量单价计算；包含失败结果和重试中的已知用量。"
+        f"费用由真实 API usage × 冻结价格快照计算（日期 {frozen['pricing']['date']}，"
+        f"地域 {frozen['pricing']['region']}）；包含失败结果和重试中的已知用量。"
         "未读取账户账单，未扣免费额度、账号优惠、Batch 或夜间折扣，因此这里是估算。"
         "缺失 usage 的请求费用未知，不能当作免费；有未知请求时表内金额仅覆盖已知用量。",
         f"缓存价格未知但回执含缓存 token 的请求共 {sum(r['unknown_cache_price_calls'] for r in models)} 次；"
@@ -273,48 +280,46 @@ def markdown(summary, frozen):
         "## 固定协议与局限",
         f"实验 `{frozen['sha256']}`；执行代码 Git `{frozen['git_commit']}`。"
         f"准备于 `{frozen['created_at']}`，最早请求 `{summary['started_at']}`，最晚结果 `{summary['finished_at']}`（UTC）。",
-        f"数据为任务 DL-NA52UU 的 {best['total']} 条记录：{best['positive_total']} 正例、{best['negative_total']} 坏例，"
-        "保留原 development 68 / holdout 30 分组。这批数据此前已用于问题排查与 prompt 开发，"
+        f"数据为任务 {tasks} 的 {best['total']} 条记录：{best['positive_total']} 正例、{best['negative_total']} 坏例，"
+        f"保留冻结的 {splits} 分组。"
         "本轮属于固定已知数据回归，原 holdout 也不能再视作独立、未见过的测试集。",
-        f"每秒采样并保留首尾，主镜头、左腕和右腕按时间对齐拼接。共 {sum(frames)} 张候选拼接帧，"
+        f"每 {sampling['interval_s']:g} 秒采样并保留首尾，主镜头、左腕和右腕按时间对齐拼接。"
+        f"共 {sum(frames)} 张候选拼接帧，"
         f"每条 {min(frames)}–{max(frames)} 张。任务调用接收任务指令、规则、当前资源参考图、全部候选帧及夹爪/触觉时序；"
         "独立画质调用只接收同一套候选帧和画质 prompt。GT 在离线统计阶段关联，不进入两类模型请求。"
-        "本次重新读取任务资源并核验与缓存一致，逐条验证 MCAP、图片、信号和输入哈希。",
-        f"temperature={frozen['plan']['temperature']}，max_tokens={frozen['plan']['max_tokens']}，"
-        f"非思考模式，单次 HTTP 超时 {frozen['plan']['timeout_s']} 秒，最多 {frozen['plan']['attempts']} 次 HTTP 尝试。"
-        "每个模型一个串行 worker，不同模型并行；Qwen3-VL 两个快照按 100k TPM 的 80% 节奏限速，"
-        "其余按 1M TPM 的 80% 限速。已完成结果原样复用，业务或格式失败不为提分而补跑。"
-        "首条兼容性测试属于同一批结果及费用，没有额外重复收费。",
-        "沿用当前适配器：Qwen3.8-Max 使用 strict JSON Schema，其余使用 JSON object。"
-        "两种模式接收相同消息，但输出约束强度不同，所以本轮比较的是当前应用中的可用效果；"
-        "不能把格式失败差异全部归因于模型视觉能力。",
+        "准备时冻结任务资源并逐条记录 MCAP、图片、信号和输入哈希。",
+        table(["模型", "temperature", "max_tokens", "enable_thinking", "HTTP 超时秒", "最多尝试", "TPM"],
+              [[r["model"], *[settings[r["model"]][key] for key in
+                              ("temperature", "max_tokens", "enable_thinking", "timeout_s", "attempts")],
+                frozen["plan"]["model_tpm"].get(r["model"], frozen["plan"]["default_tpm"])] for r in models]),
+        "每个模型一个串行 worker，不同模型并行，按配置 TPM 的 80% 节奏限速。"
+        "已完成结果原样复用，业务或格式失败不为提分而补跑。",
+        "响应格式以实际请求回执为准。不同格式的输出约束强度可能不同，"
+        "本轮比较的是当前应用中的可用效果，不能把格式失败差异全部归因于模型视觉能力。",
         table(["请求模型 ID", "回执返回 model", "响应格式", "含非空 reasoning_content 的请求"],
               [[r["model"], ", ".join(r["returned_models"]), ", ".join(r["response_formats"]),
                 r["reasoning_response_calls"]] for r in models]),
-        "qwen3.8-flash 和 qwen-vl-max 使用服务别名；回执若仍返回别名，无法据此确定底层权重版本。"
+        "使用服务别名时，回执若仍返回别名，无法据此确定底层权重版本。"
         "HTTP 成功与业务成功分开统计；输出截断、额外字段、缺帧或无效证据等均保留失败。",
         "## 价格来源",
         "单位：人民币 / 百万 token。按每次请求的完整输入 token 数选择一个阶梯，"
         "该阶梯同时用于本次全部输入与输出，边界包含上限；缓存 token 属于输入的子集，不能重复累加。",
         table(["模型 / 官方来源", "输入上限", "输入", "输出", "缓存输入"],
               [[f"[{model}]({value['source']})", tier[0], tier[1], tier[2], "未采用" if tier[3] is None else tier[3]]
-               for model, value in frozen["pricing"]["models"].items() for tier in value["tiers"]]),
+               for model, value in frozen["pricing"]["models"].items()
+               if model in frozen["plan"]["models"] for tier in value["tiers"]]),
         "## 复算与证据",
-        "```bash\n# 新环境\nbash scripts/bootstrap.sh\n.tools/bin/just setup\n\n"
-        "# 查看已保存结果；不调用模型\n.tools/bin/just benchmark-report\n\n"
-        "# 从回执生成本报告；不调用模型\n.tools/bin/just benchmark-report --publish docs/benchmarks/2026-09-15\n\n"
-        "# 有原始数据、输入缓存、任务资源网络和 Qwen 凭据时运行实验\n.tools/bin/just benchmark prepare\n"
-        ".tools/bin/just benchmark run\n```",
-        "运行配置见 [benchmark.toml](../../../config/benchmark.toml)，价格快照见 "
-        "[cny_20260915.json](../../../config/prices/cny_20260915.json)。"
-        f"运行需要 `{frozen['plan']['input_run']}/` 中既有的 manifest、media（含 gripper.json）与 resources 缓存，"
-        "以及清单对应的只读 MCAP；这些文件不随 Git 分发。benchmark 复用并校验输入缓存，不负责从零生成缓存。"
-        "复用现有实验要求模型代码、prompt、规则、配置和数据哈希与冻结版本一致；"
-        "另做一轮需使用新的配置文件与 output 目录，不能覆盖本轮回执。",
+        "```bash\n# 查看已保存结果；不调用模型\n" + report_command +
+        "\n\n# 从回执生成本报告；不调用模型\n" + report_command +
+        " --publish " + shlex.quote(str(destination)) + "\n```",
+        "本报告仅依赖实验目录中的 `experiment.json`、`inputs/` 和 `models/`，"
+        "无需访问原始 MCAP、任务资源服务或调用模型。执行计划、价格与配置全文保存在 [protocol.json](protocol.json)。"
+        "新实验通过 `benchmark prepare` 从只读数据集准备自己的 `source/` 缓存；"
+        "旧缓存式实验按其冻结 Git 版本复跑。代码、prompt、规则、配置或数据变化时使用新的实验目录，不能覆盖原回执。",
         "[summary.json](summary.json) 保存完整统计；[models.csv](models.csv)、[episodes.csv](episodes.csv)、"
         "[calls.csv](calls.csv) 分别记录模型汇总、每条 GT/预测/费用和每次请求用量；"
         "[protocol.json](protocol.json) 保存代码、配置与输入哈希。",
-        f"原始脱敏请求、供应商响应及结果保存在 `{frozen['plan']['output']}/`，未将图片或运行目录提交到 Git。"
+        f"原始脱敏请求、供应商响应及结果保存在 `{work}/`，未将图片或运行目录提交到 Git。"
         f"发布前核验 {summary['audit']['requests_checked']} 份请求均与对应样本、阶段的冻结消息一致，"
         "并核对了结果范围和配置来源。",
     ]
@@ -333,7 +338,7 @@ def publish(work, destination):
     documents = {"summary.json": json.dumps(summary, ensure_ascii=False, indent=2) + "\n",
                  "protocol.json": json.dumps(protocol, ensure_ascii=False, indent=2) + "\n",
                  "models.csv": csv_text(summary["models"]), "episodes.csv": csv_text(episodes),
-                 "calls.csv": csv_text(calls), "README.md": markdown(summary, frozen)}
+                 "calls.csv": csv_text(calls), "README.md": markdown(summary, frozen, work, destination)}
     # Derived documents are deterministic; never silently overwrite differing published evidence.
     for name, content in documents.items():
         path = destination / name
@@ -347,7 +352,7 @@ def publish(work, destination):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--work", type=Path, default=Path("artifacts/experiments/model_benchmark_20260915"))
+    parser.add_argument("--work", type=Path, required=True, help="Experiment directory containing saved receipts")
     parser.add_argument("--publish", type=Path)
     parser.add_argument("--json", action="store_true", help="Print the complete offline summary")
     args = parser.parse_args()
