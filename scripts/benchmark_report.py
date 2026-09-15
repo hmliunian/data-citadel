@@ -11,7 +11,7 @@ from pydantic import ValidationError
 
 from citadel.application.experiments import counts
 from citadel.domain.models import QualityReview, Review
-from citadel.infrastructure.files import fingerprint, read
+from citadel.infrastructure.files import file_hash, fingerprint, read
 
 RESULT_GLOB = "[0-9a-f]" * 32 + ".json"
 
@@ -161,7 +161,7 @@ def summarize(work):
                                  "total_tokens": sum(row["total_tokens"] or 0 for row in receipts if row["stage"] == stage)}
                          for stage in ("task", "quality")}})
         episodes.extend(rows)
-    return {"experiment_sha256": frozen["sha256"],
+    return {"experiment_sha256": frozen["sha256"], "reporter_sha256": file_hash(Path(__file__)),
             "state": "running" if any(row["not_run"] for row in summaries) else "finished",
             "models": summaries}, episodes, calls, frozen
 
