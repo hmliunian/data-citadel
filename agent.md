@@ -1,12 +1,12 @@
 # Data Citadel 需求与方案讨论
 
-已进入实施。修改范围仅限 `data_citadel`；新流程独立设计。2026-09-15 用户授权在新分支 `refactor/server-client-uv` 重构，覆盖此前直接在 `main` 工作的约定。遵循 `.agents/skills/concise-code/SKILL.md`：代码精简，新功能验证通过后及时本地 commit。
+已进入实施。新流程独立设计。2026-09-15 用户授权在新分支 `refactor/server-client-uv` 重构。
+工程约束、文件位置、依赖方向和产物生命周期统一见 [AGENTS.md](AGENTS.md)。
 
 **工程分层（2026-09-15）**
 
-- FastAPI server、独立 HTTP Python client/CLI、浏览器调试 GUI；领域判定、应用用例与基础设施分层，具体依赖在 bootstrap 注入。
-- 自然语言 prompt 存放在 `config/prompts/`；服务、模型与任务规则集中配置，每次任务保存不可变快照。
-- uv 管理 Python、依赖与锁文件，just 提供 setup/server/client/dev/test/check 入口。
+- FastAPI server、独立 HTTP Python client/CLI、浏览器调试 GUI；具体工程分层遵循 `AGENTS.md`。
+- 每次任务保存服务、模型、任务规则和 prompt 的不可变快照。
 - 审核使用持久化任务状态与有限并发，媒体准备单独限流；保留执行器替换能力。重构保留原采样、双模型调用和判定规则。
 
 **核心需求**

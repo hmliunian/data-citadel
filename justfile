@@ -34,14 +34,15 @@ cli *args:
 
 # Unit and API tests use fake Qwen clients.
 test *args:
-    uv run --locked python -m pytest -q --basetemp artifacts/tests "$@"
+    uv run --locked python -m pytest -q --basetemp .cache/tests "$@"
 
 # Optional real Firefox UI smoke test; no real Qwen requests.
 test-gui:
-    CITADEL_BROWSER_TEST=1 uv run --locked python -m pytest -q tests/test_gui.py --basetemp artifacts/gui-tests
+    CITADEL_BROWSER_TEST=1 uv run --locked python -m pytest -q tests/test_gui.py --basetemp .cache/gui-tests
 
 # Static checks.
 check:
+    uv run --locked python scripts/check_rules.py
     uv run --locked python -m ruff check citadel citadel_client scripts tests
     git diff --check
 

@@ -24,7 +24,7 @@ just dev
 | `just dev` | 一键安装环境、启动服务、打开 GUI |
 | `just cli runs` | 用独立 HTTP client 查看注册实验 |
 | `just test` | 单元、模型适配器、服务与 API 测试 |
-| `just check` | Ruff 与 Git 空白检查 |
+| `just check` | 源码位置、Python 导入边界、Ruff 与 Git 空白检查 |
 | `just test-gui` | 使用 Firefox/geckodriver 的浏览器联调，模型为假客户端 |
 
 不设置 PATH 时，可以将上述 `just` 换成 `.tools/bin/just`。已搬移的旧虚拟环境可运行 `just setup --reinstall` 修复命令入口。添加依赖使用 `uv add 包名` / `uv add --dev 包名`，提交 `pyproject.toml` 和 `uv.lock`；日常启动不会自动更新锁文件。
@@ -36,6 +36,9 @@ ssh -N -L 8770:127.0.0.1:8770 xuran-5090-7f
 ```
 
 ## 分层
+
+工程约束以 [AGENTS.md](AGENTS.md) 为入口；业务需求见 [agent.md](agent.md)。
+新增代码前按目录职责和依赖方向选择位置，交付前运行相关测试及 `just check`。
 
 ```text
 config/
@@ -143,5 +146,27 @@ CLI 支持 `preview 记录ID --wait`、`review 记录ID --wait`、`batch --limit
 `artifacts/server/` 保存任务数据库；每个 run 下保存 `manifest.json`、`snapshots/`、`media/`、`resources/`、`calls/`、`results/` 和 `freeze.json`。结果与快照原子发布，不覆盖历史。模型请求记录中的图片仅保留摘要和长度。
 
 GT 仅参与数据划分和结果评测，不进入模型输入。开发集全部处理且无执行错误后才能冻结；冻结配置或参考资源变化时不能继续使用该留出集。已看过的记录不能再宣称为新的独立测试集。
+
+## 开发产物
+
+文件位置和保留规则见 [AGENTS.md 的产物生命周期](AGENTS.md#产物生命周期)。
+`just test`、`just test-gui` 分别使用 `.cache/tests/`、`.cache/gui-tests/`，再次运行时 pytest 会重建对应临时目录。
+并行测试用 `just test --basetemp .cache/tests-独立名称` 指定不同目录。
+测试代码使用 `tmp_path`，不要硬编码这些临时路径。新实验结果统一写入 `artifacts/experiments/<实验名>/`，
+可复跑脚本放在 `scripts/` 并提交 Git。
+
+`just check` 的规则检查器为 `scripts/check_rules.py`，仅使用 Python 标准库和 Git，失败时报告文件、行号及违规原因。
+检查覆盖已跟踪和未被忽略的新 Python、JS/TS、HTML/CSS、Shell 源码的位置，以及 Python 静态导入边界。
+忽略目录中的历史产物不参与扫描；动态加载和执行中的 I/O 仍由代码审查与相关测试验证。
+
+本地历史整理（2026-09-15）：
+
+| 原位置 | 整理后位置 |
+| --- | --- |
+| 五轮 `artifacts/refactor_*tests/`、`artifacts/tests/`、`artifacts/gui-tests/` | `.cache/scratch/legacy-tests/<原名>/` |
+| 一次性重构脚本与备份 `artifacts/refactor/` | `artifacts/archive/refactor/` |
+
+以上为同一文件系统内搬移，逐目录校验文件内容和符号链接一致；迁移记录在 `.cache/scratch/artifacts-migration.json`。
+旧审核窗口、当前 benchmark 和评测报告仍引用的模型实验保留原路径，后续完成退役再归档。
 
 旧服务的 `artifacts/visibility_v1` 等实验目录保留；新服务默认使用独立目录，历史结果不自动改写或冒充新版本结果。旧命令中的本地审核操作已移至 HTTP client。仓库修改以本轮授权的 `refactor/server-client-uv` 分支为准。
