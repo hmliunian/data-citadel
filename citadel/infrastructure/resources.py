@@ -3,9 +3,7 @@ from __future__ import annotations
 
 import base64
 import io
-import ipaddress
 from pathlib import Path
-from urllib.parse import urlsplit
 
 import httpx
 from PIL import Image
@@ -37,14 +35,9 @@ def fetch(code: str, work: Path, base_url: str = DEFAULT_BASE, *, client=None):
             image_input(work, item)
         return saved
     if client is None:
-        endpoint = urlsplit(base_url)
-        mounts = {}
-        try:
-            if ipaddress.ip_address(endpoint.hostname).is_private:
-                mounts[f"{endpoint.scheme}://{endpoint.netloc}"] = httpx.HTTPTransport()
-        except ValueError:
-            pass
-        with httpx.Client(timeout=20, follow_redirects=True, mounts=mounts) as connection:
+        # The task service and its returned image addresses are on the data
+        # network. Keep environment proxies for the separate model transport.
+        with httpx.Client(timeout=20, follow_redirects=True, trust_env=False) as connection:
             return fetch(code, work, base_url, client=connection)
     response = client.get(base_url.rstrip("/") + f"/api/collection_tasks/code/{code}/resources")
     response.raise_for_status()

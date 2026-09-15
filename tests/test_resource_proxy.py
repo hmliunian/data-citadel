@@ -1,11 +1,15 @@
 import json
+import socket
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
+
+import pytest
 
 from citadel.infrastructure.resources import fetch
 
 
-def test_private_task_api_bypasses_environment_proxy(tmp_path, jpeg, monkeypatch):
+@pytest.mark.parametrize("host", ["127.0.0.1", "172.100.11.189"])
+def test_registered_task_api_bypasses_environment_proxy(tmp_path, jpeg, monkeypatch, host):
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
             self.send_response(200)
@@ -22,7 +26,13 @@ def test_private_task_api_bypasses_environment_proxy(tmp_path, jpeg, monkeypatch
             pass
 
     server = HTTPServer(("127.0.0.1", 0), Handler)
-    base = f"http://127.0.0.1:{server.server_port}"
+    base = f"http://{host}:{server.server_port}"
+    getaddrinfo = socket.getaddrinfo
+    def resolve(name, port, *args, **kwargs):
+        if name in (host, host.encode()):
+            name = "127.0.0.1"
+        return getaddrinfo(name, port, *args, **kwargs)
+    monkeypatch.setattr(socket, "getaddrinfo", resolve)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     for variable in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"):
