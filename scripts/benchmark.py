@@ -3,7 +3,7 @@ import argparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import json
 from pathlib import Path
-import shutil
+import subprocess
 import time
 import tomllib
 import uuid
@@ -116,6 +116,8 @@ class Benchmark:
             print(json.dumps({"prepared": len(audit), "total": len(self.source.records())}), flush=True)
         experiment = {
             "created_at": now(), "purpose": "fixed_known_data_regression",
+            "git_commit": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=PROJECT_ROOT,
+                                                   text=True).strip(),
             "plan": self.plan, "plan_sha256": file_hash(self.plan_path),
             "runner_sha256": file_hash(Path(__file__)), "configuration": snapshot,
             "manifest": self.source.manifest, "input_audit": audit,
@@ -123,10 +125,6 @@ class Benchmark:
             "model_settings": {model: self.settings(model).model_dump() for model in models}}
         experiment["sha256"] = fingerprint(experiment)
         frozen_write(marker, experiment)
-        for folder in ("citadel", "config"):
-            shutil.copytree(PROJECT_ROOT / folder, self.work / "code" / folder,
-                            ignore=shutil.ignore_patterns("__pycache__"), dirs_exist_ok=True)
-        shutil.copy2(__file__, self.work / "code" / "benchmark.py")
         return experiment
 
     def validate(self):

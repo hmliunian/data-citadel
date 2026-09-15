@@ -146,6 +146,6 @@ def csv_text(rows):
 
 
 if __name__ == "__main__":
-    summary, _, _, _ = summarize(Path("artifacts/benchmark_20260915"))
+    summary, _, _, _ = summarize(Path("artifacts/experiments/model_benchmark_20260915"))
     print(json.dumps([{key: row[key] for key in
                      ("model", "matched", "failed", "not_run", "calls", "list_cny")} for row in summary["models"]]))
