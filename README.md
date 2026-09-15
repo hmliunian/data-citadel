@@ -189,9 +189,20 @@ artifacts/experiments/<实验名>/
 
 ## 开发产物
 
+`data_citadel` 是完整项目。`citadel/server/` 保存 HTTP 服务源码；项目内的运行产物按下表组织：
+
+| 目录 | 内容 |
+| --- | --- |
+| `artifacts/server/` | 服务任务数据库、每个 run 的清单、媒体、资源、调用与审核结果 |
+| `artifacts/experiments/<实验名>/` | 独立实验的输入缓存、冻结协议、调用回执与评测结果 |
+| `artifacts/archive/<实验名>/` | 已结束且完成使用和引用核查的历史证据 |
+
 文件位置和保留规则见 [AGENTS.md 的产物生命周期](AGENTS.md#产物生命周期)。
+源码、复用脚本和测试写入正式代码目录并提交 Git；项目产物留在项目内部。
 `just test`、`just test-gui` 分别使用 `.cache/tests/`、`.cache/gui-tests/`，再次运行时 pytest 会重建对应临时目录。
 并行测试用 `just test --basetemp .cache/tests-独立名称` 指定不同目录。
+本机 Snap 版 Firefox 无法使用 `/tmp` 工作树中的浏览器临时目录；需要 `just test-gui` 时，
+将独立工作树放在用户主目录下可访问的位置，搬移环境后运行 `just setup --reinstall`。
 测试代码使用 `tmp_path`，不要硬编码这些临时路径。新实验结果统一写入 `artifacts/experiments/<实验名>/`，
 可复跑脚本放在 `scripts/` 并提交 Git。
 
@@ -199,7 +210,7 @@ artifacts/experiments/<实验名>/
 检查覆盖已跟踪和未被忽略的新 Python、JS/TS、HTML/CSS、Shell 源码的位置，以及 Python 静态导入边界。
 忽略目录中的历史产物不参与扫描；动态加载和执行中的 I/O 仍由代码审查与相关测试验证。
 
-本地历史整理（2026-09-15）：
+原工作树的本地历史整理（2026-09-15）：
 
 | 原位置 | 整理后位置 |
 | --- | --- |
@@ -209,4 +220,6 @@ artifacts/experiments/<实验名>/
 以上为同一文件系统内搬移，逐目录校验文件内容和符号链接一致；迁移记录在 `.cache/scratch/artifacts-migration.json`。
 旧审核窗口、当前 benchmark 和评测报告仍引用的模型实验保留原路径，后续完成退役再归档。
 
-旧服务的 `artifacts/visibility_v1` 等实验目录保留；新服务默认使用独立目录，历史结果不自动改写或冒充新版本结果。旧命令中的本地审核操作已移至 HTTP client。仓库修改以本轮授权的 `refactor/server-client-uv` 分支为准。
+本轮整理在独立工作树的 `refactor/project-cleanup` 分支进行。环境、缓存与运行产物均在该工作树建立，
+不复制旧 `artifacts/` 中的服务源码快照和实验缓存。原工作树继续运行现有评测；旧窗口及已保存结果仍按原版本读取，
+待使用结束、引用核查通过后再归档。分支交付不包含合并、服务切换或旧实验目录删除。

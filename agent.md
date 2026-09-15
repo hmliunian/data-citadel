@@ -1,6 +1,8 @@
 # Data Citadel 需求与方案讨论
 
-已进入实施。新流程独立设计。2026-09-15 用户授权在新分支 `refactor/server-client-uv` 重构。
+已进入实施。2026-09-15 用户确认 `data_citadel` 为完整项目，并授权在独立工作树的新分支
+`refactor/project-cleanup` 继续整理。原 `refactor/server-client-uv` 分支正在评测，本次交付为新分支的本地提交；
+当前评测继续使用原工作树，切换使用和历史产物归档另行进行。
 工程约束、文件位置、依赖方向和产物生命周期统一见 [AGENTS.md](AGENTS.md)。
 
 **工程分层（2026-09-15）**
