@@ -131,7 +131,9 @@ def test_mid_video_hold_does_not_prove_final_airborne_state(model_case, answer):
     assert decide(answer, media, profile)["status"] == "needs_review"
 
 
-@pytest.mark.parametrize("model", ["qwen3.5-plus-2026-02-15", "qwen3.8-max-0902"])
+@pytest.mark.parametrize("model", ["qwen3.5-plus-2026-02-15", "qwen3.8-max-0902",
+                                  "qwen3.7-plus-2026-05-26", "qwen3.8-flash",
+                                  "qwen3-vl-plus-2025-12-19", "qwen3-vl-flash-2026-01-22"])
 def test_supported_new_qwen_runs_without_hidden_thinking(model_case, answer, model):
     work, resources, profile, media = model_case
     seen = []

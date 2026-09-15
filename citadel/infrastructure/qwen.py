@@ -11,7 +11,7 @@ import httpx
 
 from citadel.configuration import ModelSettings, PROJECT_ROOT
 from citadel.domain.models import CAMERAS, CHECKS, QualityReview, Review
-from .files import fingerprint, write
+from .files import fingerprint, now, write
 
 
 def safe_messages(value):
@@ -53,7 +53,8 @@ class QwenGateway:
         payload = {"model": self.model, "messages": request_messages,
                    "temperature": self.settings.temperature,
                    "max_tokens": self.settings.max_tokens, "response_format": {"type": "json_object"}}
-        if self.model.startswith(("qwen3.8-max", "qwen3.5-plus", "qwen3-vl-plus", "qwen3-vl-flash")):
+        if self.model.startswith(("qwen3.8-max", "qwen3.8-flash", "qwen3.7-plus",
+                                  "qwen3.5-plus", "qwen3-vl-plus", "qwen3-vl-flash")):
             payload["enable_thinking"] = self.settings.enable_thinking
         if self.model.startswith("qwen3.8-max"):
             schema = (QualityReview if quality_only else Review).model_json_schema()
@@ -94,6 +95,7 @@ class QwenGateway:
             for attempt in range(self.settings.attempts):
                 folder = self.work / "calls" / uuid.uuid4().hex
                 write(folder / "request.json", {
+                    "created_at": now(),
                     "model": self.model, "base_url": self.base_url, "attempt": attempt + 1,
                     "context": context or {}, "request_sha256": fingerprint(payload),
                     "input_images": count, "messages": safe_messages(request_messages),
@@ -103,7 +105,8 @@ class QwenGateway:
                     response = client.post(self.base_url + "/chat/completions", json=payload,
                                            headers={"Authorization": "Bearer " + key})
                 except httpx.TransportError as exc:
-                    write(folder / "error.json", {"type": type(exc).__name__})
+                    write(folder / "error.json", {"type": type(exc).__name__,
+                                                 "elapsed_s": time.monotonic() - start})
                     if attempt + 1 < self.settings.attempts:
                         continue
                     raise RuntimeError("Qwen transport failure") from exc
@@ -127,4 +130,3 @@ class QwenGateway:
                         "elapsed_s": elapsed, "call_path": str(folder.relative_to(self.work)),
                         "request_id": raw.get("id")}
         raise RuntimeError("Qwen returned no result")
-
