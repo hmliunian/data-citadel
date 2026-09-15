@@ -49,3 +49,7 @@ check:
 # Fixed-input, seven-model regression benchmark (run sends real Qwen requests).
 benchmark *args:
     uv run --locked python scripts/benchmark.py "$@"
+
+# Recompute scores and costs from local receipts; no model requests.
+benchmark-report *args:
+    uv run --locked python scripts/benchmark_report.py "$@"
