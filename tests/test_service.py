@@ -1,22 +1,29 @@
 import json
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
-from citadel.service import BusyError, GateError
+from citadel.domain.errors import GateError
+
+
+def first_id(run):
+    return run.source.manifest["splits"]["development"][0]
 
 
 def test_gt_never_sent_and_result_reused(service_case):
-    service, client = service_case
-    episode_id = next(i for i in service.manifest["splits"]["development"]
-                      if service.manifest["episodes"][i]["gt"] == "incorrect")
-    first = service.review(episode_id)
-    second = service.review(episode_id)
-    assert first["label"] == "correct" and first["evaluation"]["gt"] == "incorrect"
-    assert not first["cached"] and second["cached"] and len(client.requests) == 1
-    sent = json.dumps(client.requests)
+    run, client = service_case
+    episode_id = next(i for i in run.source.manifest["splits"]["development"]
+                      if run.source.records()[i]["gt"] == "incorrect")
+    snapshot = run.snapshot()
+    first = run.reviews.review(episode_id, snapshot)
+    second = run.reviews.review(episode_id, snapshot)
+    assert first["label"] == "correct"
+    assert run.experiment.decorate(first)["evaluation"]["gt"] == "incorrect"
+    assert "evaluation" not in first
+    assert not first["cached"] and second["cached"] and len(client.requests) == 2
     for sentinel in ("PRIVATE_GT_REASON", "PRIVATE_REVIEWER", "Accepted", "Denied", '"gt"'):
-        assert sentinel not in sent
-    report = service.report()
+        assert sentinel not in json.dumps(client.requests)
+    report = run.experiment.report("development", snapshot)
     assert report["counts"]["total"] == 6
     assert report["counts"]["not_run"] == 5
     assert report["counts"]["false_accept"] == 1
@@ -24,96 +31,103 @@ def test_gt_never_sent_and_result_reused(service_case):
 
 
 def test_failed_call_requires_explicit_retry(service_case):
-    service, client = service_case
-    episode_id = service.manifest["splits"]["development"][0]
+    run, client = service_case
+    episode_id, snapshot = first_id(run), run.snapshot()
     client.error = RuntimeError("private vendor error")
-    first = service.review(episode_id)
+    first = run.reviews.review(episode_id, snapshot)
     assert first["status"] == "failed" and first["label"] is None
     assert "private vendor error" not in json.dumps(first)
     client.error = None
-    assert service.review(episode_id)["status"] == "failed"
+    assert run.reviews.review(episode_id, snapshot)["status"] == "failed"
     assert len(client.requests) == 1
-    assert service.review(episode_id, retry_failed=True)["status"] == "completed"
-    assert len(client.requests) == 2
+    assert run.reviews.review(episode_id, snapshot, retry_failed=True)["status"] == "completed"
+    assert len(client.requests) == 3
 
 
 def test_holdout_requires_complete_development_and_unchanged_freeze(service_case):
-    service, client = service_case
-    holdout = service.manifest["splits"]["holdout"][0]
+    run, _ = service_case
+    snapshot = run.snapshot()
+    holdout = run.source.manifest["splits"]["holdout"][0]
     with pytest.raises(GateError):
-        service.review(holdout)
+        run.authorize(holdout)
     with pytest.raises(GateError):
-        service.freeze()
-    for episode_id in service.manifest["splits"]["development"]:
-        assert service.review(episode_id)["status"] == "completed"
-    service.freeze()
-    assert service.review(holdout)["status"] == "completed"
-    profiles = json.loads(service.profiles_path.read_text())
+        run.experiment.freeze(snapshot)
+    for episode_id in run.source.manifest["splits"]["development"]:
+        assert run.reviews.review(episode_id, snapshot)["status"] == "completed"
+    run.experiment.freeze(snapshot)
+    assert run.reviews.review(holdout, snapshot)["status"] == "completed"
+    path = run.configuration.root / "tasks.json"
+    profiles = json.loads(path.read_text())
     profiles["grasp"]["success"] = "changed"
-    service.profiles_path.write_text(json.dumps(profiles))
+    path.write_text(json.dumps(profiles))
     with pytest.raises(GateError, match="changed"):
-        service.review(holdout)
+        run.authorize(holdout)
 
 
-def test_configuration_change_does_not_reuse_old_result(service_case):
-    service, client = service_case
-    episode_id = service.manifest["splits"]["development"][0]
-    first = service.review(episode_id)
-    profiles = json.loads(service.profiles_path.read_text())
-    profiles["grasp"]["allowed"] = "其他允许的路径"
-    service.profiles_path.write_text(json.dumps(profiles))
-    second = service.review(episode_id)
-    assert len(client.requests) == 2
+def test_prompt_change_versions_results_and_old_snapshot_stays_stable(service_case):
+    run, client = service_case
+    snapshot = run.snapshot()
+    episode_id = first_id(run)
+    first = run.reviews.review(episode_id, snapshot)
+    path = run.configuration.root / "prompts/review_system.txt"
+    path.write_text(path.read_text() + "新的审核说明。")
+    changed = run.snapshot()
+    second = run.reviews.review(episode_id, changed)
+    assert len(client.requests) == 4
     assert first["configuration_sha256"] != second["configuration_sha256"]
+    assert "新的审核说明。" in client.requests[2][0]["content"]
+    assert run.reviews.review(episode_id, snapshot)["result_id"] == first["result_id"]
+    assert len(run.artifacts.history(episode_id)) == 2
 
 
-def test_concurrent_review_rejected_before_model_call(service_case):
-    service, client = service_case
-    with service.lock(), pytest.raises(BusyError):
-        service.review(service.manifest["splits"]["development"][0])
-    assert client.requests == []
+def test_same_episode_is_reviewed_once_across_concurrent_callers(service_case):
+    run, client = service_case
+    episode_id, snapshot = first_id(run), run.snapshot()
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        jobs = [pool.submit(run.reviews.review, episode_id, snapshot) for _ in range(2)]
+        results = [job.result() for job in jobs]
+    assert len({result["result_id"] for result in results}) == 1
+    assert len(client.requests) == 2
 
 
 def test_invalid_response_is_failed_not_business_rejection(service_case, answer):
-    service, client = service_case
+    run, _ = service_case
     answer["checks"]["action"]["evidence_ids"] = ["V999"]
-    result = service.review(service.manifest["splits"]["development"][0])
+    result = run.reviews.review(first_id(run), run.snapshot())
     assert result["status"] == "failed" and result["error"]["stage"] == "evidence"
     assert result["label"] is None and "model_call" in result
 
 
-def test_batch_is_bounded_resumable_and_exclusive(service_case):
-    import threading
-    service, client = service_case
-    original = client.complete
-    lock, ready = threading.Lock(), threading.Event()
-    active, peak = 0, 0
-    def complete(*args, **kwargs):
-        nonlocal active, peak
-        with lock:
-            active += 1
-            peak = max(active, peak)
-            if active == 2:
-                ready.set()
-        assert ready.wait(3), "Batch did not run two independent candidates concurrently"
-        with pytest.raises(BusyError):
-            service.review(service.manifest["splits"]["development"][0])
-        value = original(*args, **kwargs)
-        with lock:
-            active -= 1
-        return value
-    client.complete = complete
-    results = list(service.run(workers=2))
-    assert len(results) == 6 and peak == 2
-    assert all(r["status"] == "completed" for r in results)
-    assert len({r["configuration_sha256"] for r in results}) == 1
-    assert all(r["cached"] for r in service.run(workers=2))
-    assert len(client.requests) == 6
-
-
 def test_changed_code_cannot_be_mislabeled_as_loaded_version(service_case, monkeypatch):
-    service, client = service_case
-    monkeypatch.setattr("citadel.service.code_version", lambda: {"model.py": "changed"})
+    run, client = service_case
+    monkeypatch.setattr("citadel.configuration.code_version", lambda: {"domain/decision.py": "changed"})
     with pytest.raises(GateError, match="restart"):
-        service.review(service.manifest["splits"]["development"][0])
+        run.snapshot()
     assert client.requests == []
+
+
+def test_quality_failure_does_not_release_a_successful_action(service_case):
+    run, client = service_case
+    original = client.complete
+    def complete(*args, quality_only=False, **kwargs):
+        if quality_only:
+            raise RuntimeError("quality unavailable")
+        return original(*args, **kwargs)
+    client.complete = complete
+    result = run.reviews.review(first_id(run), run.snapshot())
+    assert result["status"] == "failed" and result["label"] is None
+    assert result["error"]["stage"] == "quality" and "model_call" in result
+
+
+def test_quality_response_cannot_overwrite_task_checks(service_case):
+    run, client = service_case
+    original = client.complete
+    def complete(*args, quality_only=False, **kwargs):
+        response = original(*args, quality_only=quality_only, **kwargs)
+        if quality_only:
+            response["data"]["checks"] = {"action": {"state": "fail", "evidence_ids": ["V000"]}}
+        return response
+    client.complete = complete
+    result = run.reviews.review(first_id(run), run.snapshot())
+    assert result["status"] == "failed" and result["label"] is None
+    assert result["error"]["stage"] == "quality"

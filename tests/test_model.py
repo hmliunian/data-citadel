@@ -1,11 +1,19 @@
+from citadel.configuration import PromptBundle
+from citadel.infrastructure.resources import image_input
 import copy
 import json
 
 import httpx
 import pytest
 
-from citadel.data import read
-from citadel.model import CHECKS, Qwen, decide, messages
+from citadel.infrastructure.files import read
+from citadel.domain.models import CHECKS
+from citadel.domain.decision import decide
+from citadel.infrastructure.qwen import QwenGateway as Qwen
+from citadel.application.prompts import PromptBuilder
+
+messages = PromptBuilder(PromptBundle.load(), image_input).review
+quality_messages = PromptBuilder(PromptBundle.load(), image_input).quality
 
 
 def test_basic_grasp_and_actual_timestamps(model_case, answer):
@@ -24,6 +32,8 @@ def test_basic_grasp_and_actual_timestamps(model_case, answer):
 def test_each_bad_boundary_rejects(model_case, answer, check):
     _, _, profile, media = model_case
     answer["checks"][check]["state"] = "fail"
+    if check == "image_quality":
+        answer["quality_by_camera"]["main"]["state"] = "fail"
     if check == "main_visibility":
         answer["main_visibility_by_frame"]["V001"] = "absent"
     result = decide(answer, media, profile)
@@ -85,7 +95,7 @@ def test_stitched_sequence_keeps_timestamps_and_safe_trace(model_case, answer):
 
 def test_retry_is_bounded_and_every_attempt_recorded(model_case, monkeypatch):
     work, resources, profile, media = model_case
-    monkeypatch.setattr("citadel.model.time.sleep", lambda _: None)
+    monkeypatch.setattr("citadel.infrastructure.qwen.time.sleep", lambda _: None)
     calls = []
     def respond(request):
         calls.append(request)
@@ -121,7 +131,9 @@ def test_mid_video_hold_does_not_prove_final_airborne_state(model_case, answer):
     assert decide(answer, media, profile)["status"] == "needs_review"
 
 
-@pytest.mark.parametrize("model", ["qwen3.5-plus-2026-02-15", "qwen3.8-max-0902"])
+@pytest.mark.parametrize("model", ["qwen3.5-plus-2026-02-15", "qwen3.8-max-0902",
+                                  "qwen3.7-plus-2026-05-26", "qwen3.8-flash",
+                                  "qwen3-vl-plus-2025-12-19", "qwen3-vl-flash-2026-01-22"])
 def test_supported_new_qwen_runs_without_hidden_thinking(model_case, answer, model):
     work, resources, profile, media = model_case
     seen = []
@@ -210,9 +222,74 @@ def test_response_schema_requires_each_frame_and_respects_camera_presence(model_
     Qwen(work, api_key="secret", transport=httpx.MockTransport(respond)).complete(
         messages(work, resources, profile, media))
     schema = sent[0]["response_format"]["json_schema"]["schema"]
+    assert "quality_by_camera" not in schema["properties"]
     table = schema["properties"]["main_visibility_by_frame"]
     assert "main_visibility_by_frame" in schema["required"]
     assert table["required"] == ["V000", "V001", "V002", "V003"]
     assert table["additionalProperties"] is False
     assert table["properties"]["V000"]["enum"] == ["no_frame"]
     assert table["properties"]["V001"]["enum"] == ["visible", "absent", "uncertain"]
+
+
+@pytest.mark.parametrize("camera", ["main", "left_wrist", "right_wrist"])
+def test_one_blurred_camera_rejects_despite_clear_other_views(model_case, answer, camera):
+    _, _, profile, media = model_case
+    answer["quality_by_camera"][camera].update(
+        state="fail", evidence_ids=["V001", "V003"], description="持续发虚，轮廓尚可见")
+    result = decide(answer, media, profile)
+    assert result["label"] == "incorrect"
+    assert result["checks"]["image_quality"] == {"state": "fail", "evidence_ids": ["V001", "V003"]}
+    assert result["checks"]["action"]["state"] == "pass"
+    assert result["checks"]["main_visibility"]["state"] == "pass"
+
+
+def test_missing_camera_quality_or_unknown_evidence_cannot_pass(model_case, answer):
+    _, _, profile, media = model_case
+    del answer["quality_by_camera"]["main"]
+    with pytest.raises(ValueError, match="all three cameras"):
+        decide(answer, media, profile)
+    answer["quality_by_camera"]["main"] = {
+        "state": "unknown", "evidence_ids": [], "description": "画质证据不足"}
+    assert decide(answer, media, profile)["status"] == "needs_review"
+    answer["quality_by_camera"]["main"].update(state="fail", evidence_ids=["V999"])
+    with pytest.raises(ValueError, match="Evidence"):
+        decide(answer, media, profile)
+
+
+def test_quality_ignores_technical_blank_evidence(model_case, answer):
+    _, _, profile, media = model_case
+    media["frames"][0]["sources"]["main"] = None
+    answer["quality_by_camera"]["main"].update(state="fail", evidence_ids=["V000"])
+    result = decide(answer, media, profile)
+    assert result["status"] == "needs_review"
+    assert result["checks"]["image_quality"]["state"] == "unknown"
+    assert result["quality_by_camera"]["main"]["evidence_ids"] == []
+
+def test_conflicting_quality_summary_needs_review(model_case, answer):
+    _, _, profile, media = model_case
+    answer["checks"]["image_quality"]["state"] = "fail"
+    assert decide(answer, media, profile)["status"] == "needs_review"
+
+
+def test_quality_call_is_separate_from_task_references_and_gripper(model_case, answer):
+    work, _, _, media = model_case
+    media["gripper"] = {"private_sensor_marker": True}
+    request = quality_messages(work, media)
+    seen = []
+    def respond(sent):
+        seen.append(json.loads(sent.content))
+        data = {"quality_by_camera": answer["quality_by_camera"]}
+        return httpx.Response(200, json={"choices": [{
+            "finish_reason": "stop", "message": {"content": json.dumps(data)}}]})
+    Qwen(work, api_key="secret", transport=httpx.MockTransport(respond)).complete(
+        request, quality_only=True)
+    schema = seen[0]["response_format"]["json_schema"]["schema"]
+    assert schema["required"] == ["quality_by_camera"]
+    assert set(schema["properties"]["quality_by_camera"]["required"]) == {
+        "main", "left_wrist", "right_wrist"}
+    assert schema["properties"]["quality_by_camera"]["additionalProperties"] is False
+    serialized = json.dumps(request)
+    for excluded in ("gripper_before", "reference_type", "private_sensor_marker"):
+        assert excluded not in serialized
+    assert sum(p["type"] == "image_url" for p in request[1]["content"]) == len(media["frames"])
+    assert media["gripper"] == {"private_sensor_marker": True}

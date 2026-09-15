@@ -1,13 +1,19 @@
 import io
 import copy
+import json
+import shutil
+import threading
 from pathlib import Path
 
 import pytest
 from PIL import Image
 
-from citadel.data import file_hash, fingerprint, prepare, write
-from citadel.model import CHECKS
-from citadel.service import Service
+from citadel.infrastructure.files import file_hash, fingerprint, write
+from citadel.infrastructure.datasets import prepare
+from citadel.domain.models import CHECKS
+from citadel.bootstrap import build_run, build_runtime
+from citadel.configuration import CONFIG_ROOT, Configuration, ServerSettings
+from citadel.infrastructure.qwen import QwenGateway
 
 
 @pytest.fixture
@@ -65,6 +71,9 @@ def answer():
         {"phase": "start", "description": "物体静置", "evidence_ids": ["V000"]},
         {"phase": "hold", "description": "夹持并持续悬空", "evidence_ids": ["V001", "V002", "V003"]},
         {"phase": "end", "description": "末态仍悬空", "evidence_ids": ["V003"]}],
+        "quality_by_camera": {v: {"state": "pass", "evidence_ids": ["V000", "V003"],
+                                  "description": "操作区边缘清晰"}
+                              for v in ("main", "left_wrist", "right_wrist")},
         "main_visibility_by_frame": {f"V{i:03d}": "visible" for i in range(4)},
         "checks": {key: {"state": "pass", "evidence_ids": ["V000", "V003"]} for key in CHECKS},
         "hold": {"state": "pass", "evidence_ids": ["V001", "V002", "V003"]},
@@ -77,8 +86,9 @@ def service_case(tmp_path, dataset, model_case, answer, jpeg):
     work = tmp_path / "run"
     prepare(dataset, work)
     (work / "image.jpg").write_bytes(jpeg)
-    profiles = work / "rules.json"
-    write(profiles, {"grasp": {**profile, "action_ids": ["A_001"]}})
+    config = tmp_path / "config"
+    shutil.copytree(CONFIG_ROOT, config)
+    (config / "tasks.json").write_text(json.dumps({"grasp": {**profile, "action_ids": ["A_001"]}}))
     resources = {**resources, "task_code": "DL-TEST"}
     resources["sha256"] = fingerprint(resources)
     class FakeClient:
@@ -86,11 +96,18 @@ def service_case(tmp_path, dataset, model_case, answer, jpeg):
         def __init__(self):
             self.requests = []
             self.error = None
-        def complete(self, request_messages, context):
+        def complete(self, request_messages, context, *, quality_only=False):
             self.requests.append(copy.deepcopy(request_messages))
             if self.error:
                 raise self.error
-            return {"data": copy.deepcopy(answer), "model": self.model, "usage": {}}
+            data = copy.deepcopy(answer)
+            if quality_only:
+                data = {"quality_by_camera": data["quality_by_camera"]}
+            else:
+                data.pop("quality_by_camera")
+            return {"data": data, "model": self.model, "usage": {}}
+        def preview(self, messages, *, quality_only=False):
+            return QwenGateway(work).preview(messages, quality_only=quality_only)
     client = FakeClient()
     def load_media(output, source, sampling):
         assert set(source) == {"episode_id", "mcap_path", "mcap_sha256"}
@@ -107,6 +124,18 @@ def service_case(tmp_path, dataset, model_case, answer, jpeg):
         if not (folder / "media.json").exists():
             write(folder / "media.json", result)
         return result
-    service = Service(work, profiles, client=client,
-                      resource_loader=lambda *args: resources, media_loader=load_media)
-    return service, client
+    run = build_run("test", work, Configuration(config), "https://example.invalid",
+                    threading.BoundedSemaphore(1), resource_loader=lambda *args: resources,
+                    media_loader=load_media, gateway_factory=lambda snapshot: client)
+    return run, client
+
+
+@pytest.fixture
+def runtime_case(tmp_path, service_case):
+    run, client = service_case
+    runtime = build_runtime(settings=ServerSettings(work_dir=tmp_path / "server", workers=2),
+                            runs={"test": run})
+    try:
+        yield runtime, client
+    finally:
+        runtime.jobs.close()

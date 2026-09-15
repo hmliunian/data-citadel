@@ -4,8 +4,9 @@ from types import SimpleNamespace
 import flatbuffers
 import pytest
 
-from citadel.flatbuffer import Schema
-from citadel.sensors import TOPICS, intervals, prepare_gripper, read_gripper
+from citadel.infrastructure.mcap.flatbuffer import Schema
+from citadel.domain.signals import intervals
+from citadel.infrastructure.mcap.sensors import TOPICS, prepare_gripper, read_gripper
 
 
 def vector_fixture(inline):
@@ -102,9 +103,9 @@ def test_signal_clock_load_gaps_and_cache_integrity(tmp_path, monkeypatch):
         message("left_finger0", 0.03, {"points": [{"fx": 3, "fy": 4, "fz": 0}]}),
         message("left_finger0", 0.04, {"points": [{"fx": float("nan"), "fy": 0, "fz": 0}]}),
     ]
-    monkeypatch.setattr("citadel.sensors.make_reader",
+    monkeypatch.setattr("citadel.infrastructure.mcap.sensors.make_reader",
                         lambda *a, **k: SimpleNamespace(iter_messages=lambda **k: iter(rows)))
-    monkeypatch.setattr("citadel.sensors.Schema",
+    monkeypatch.setattr("citadel.infrastructure.mcap.sensors.Schema",
                         lambda *a: SimpleNamespace(decode=lambda data: json.loads(data)))
     source = tmp_path / "sample.mcap"
     source.write_bytes(b"fake container; reader is injected")

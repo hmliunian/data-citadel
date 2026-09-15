@@ -1,8 +1,10 @@
 import httpx
 import pytest
 
-from citadel.data import inventory, load_manifest, prepare, profile_for, read
-from citadel.resources import fetch
+from citadel.infrastructure.files import read
+from citadel.infrastructure.datasets import inventory, load_manifest, prepare
+from citadel.domain.tasks import profile_for
+from citadel.infrastructure.resources import fetch
 
 PROFILES = {"grasp": {"action_ids": ["A_001"], "success": "悬空", "allowed": "换手",
                       "failures": ["失败"], "hold_seconds": 2, "hold_tolerance_s": 0.2}}
@@ -92,7 +94,7 @@ def test_source_gt_is_retained_without_expert_requirement(dataset, tmp_path):
 
 
 def test_task_local_action_ids_cannot_select_another_task():
-    from citadel.data import profile_for
+    from citadel.domain.tasks import profile_for
     common = {"action_ids": ["A_001"], "allowed": "自由路径", "failures": ["未完成"]}
     profiles = {
         "grasp": {**common, "task_codes": ["DL-GRASP"], "success": "抓起"},

@@ -1,4 +1,6 @@
 .venv/
+.tools/
+.cache/
 Qwen-api/
 .env
 artifacts/

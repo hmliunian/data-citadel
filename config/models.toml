@@ -1,0 +1,9 @@
+model = "qwen3.8-max-0902"
+base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+temperature = 0.0
+enable_thinking = false
+max_tokens = 5000
+timeout_s = 180.0
+connect_timeout_s = 15.0
+attempts = 2
+max_images = 250

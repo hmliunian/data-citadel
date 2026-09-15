@@ -1,0 +1,133 @@
+{
+  "date": "2026-09-15",
+  "currency": "CNY",
+  "region": "cn-beijing",
+  "basis": "Published on-demand list prices; no free quota, account promotions or Batch discount. Cached prices apply only to reported cached input tokens.",
+  "columns": [
+    "maximum_input_tokens",
+    "input_per_million",
+    "output_per_million",
+    "cached_input_per_million"
+  ],
+  "models": {
+    "qwen3.8-max-0902": {
+      "source": "https://help.aliyun.com/zh/model-studio/qwen3-8-max",
+      "tiers": [
+        [
+          1000000,
+          12,
+          36,
+          1.5
+        ]
+      ]
+    },
+    "qwen3.7-plus-2026-05-26": {
+      "source": "https://help.aliyun.com/zh/model-studio/qwen3-7-plus",
+      "tiers": [
+        [
+          262144,
+          2,
+          8,
+          0.4
+        ],
+        [
+          1000000,
+          6,
+          24,
+          1.2
+        ]
+      ]
+    },
+    "qwen3.8-flash": {
+      "source": "https://help.aliyun.com/zh/model-studio/qwen3-8-flash",
+      "tiers": [
+        [
+          1000000,
+          0.8,
+          2.7,
+          0.1
+        ]
+      ]
+    },
+    "qwen3-vl-plus-2025-12-19": {
+      "source": "https://help.aliyun.com/zh/model-studio/qwen3-vl-plus",
+      "tiers": [
+        [
+          32768,
+          1,
+          10,
+          null
+        ],
+        [
+          131072,
+          1.5,
+          15,
+          null
+        ],
+        [
+          262144,
+          3,
+          30,
+          null
+        ]
+      ]
+    },
+    "qwen3-vl-flash-2026-01-22": {
+      "source": "https://help.aliyun.com/zh/model-studio/qwen3-vl-flash",
+      "tiers": [
+        [
+          32768,
+          0.15,
+          1.5,
+          null
+        ],
+        [
+          131072,
+          0.3,
+          3,
+          null
+        ],
+        [
+          262144,
+          0.6,
+          6,
+          null
+        ]
+      ]
+    },
+    "qwen3.5-plus-2026-02-15": {
+      "source": "https://help.aliyun.com/zh/model-studio/qwen3-5-plus",
+      "tiers": [
+        [
+          131072,
+          0.8,
+          4.8,
+          null
+        ],
+        [
+          262144,
+          2,
+          12,
+          null
+        ],
+        [
+          1000000,
+          4,
+          24,
+          null
+        ]
+      ]
+    },
+    "qwen-vl-max": {
+      "source": "https://help.aliyun.com/zh/model-studio/qwen-vl-max",
+      "tiers": [
+        [
+          131072,
+          1.6,
+          4,
+          0.32
+        ]
+      ]
+    }
+  }
+}

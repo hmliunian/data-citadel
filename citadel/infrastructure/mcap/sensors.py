@@ -1,12 +1,11 @@
 """Timestamped gripper position and relative tactile load; never infer a grasp label."""
-from collections import defaultdict
 import math
 from pathlib import Path
 import struct
 
 from mcap.reader import make_reader
 
-from .data import fingerprint, read, write
+from ..files import fingerprint, read, write
 from .flatbuffer import Schema
 
 TOPICS = {
@@ -86,21 +85,3 @@ def prepare_gripper(source: Path, folder: Path, origin: int, source_hash: str):
     value["sha256"] = fingerprint(value)
     write(path, value)
     return value
-
-
-def intervals(gripper, frames):
-    """Keep 0.1s extrema between adjacent visual frames; no interpolation or zero filling."""
-    previous, output = 0, []
-    for index, frame in enumerate(frames):
-        end = frame["time_s"]
-        buckets = defaultdict(lambda: [[] for _ in TOPICS])
-        for i, name in enumerate(TOPICS):
-            for stamp, value in gripper["channels"].get(name, {}).get("samples", []):
-                if previous <= stamp <= end and (index == 0 or stamp > previous):
-                    buckets[math.floor(stamp * 10)][i].append(value)
-        output.append([
-            [round(max(previous, b / 10), 6), round(min(end, (b + 1) / 10), 6)] +
-            [[round(min(v), 2), round(max(v), 2)] if v else None for v in columns]
-            for b, columns in sorted(buckets.items())])
-        previous = end
-    return output
